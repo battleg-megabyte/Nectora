@@ -1,0 +1,6 @@
+{
+  "name": "NEcTORa - Video Downloader",
+  "description": "High-speed video downloader and media intelligence analyzer for Instagram, TikTok, Facebook, and direct media URLs with 480p, 720p, and 1080p stream extraction.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

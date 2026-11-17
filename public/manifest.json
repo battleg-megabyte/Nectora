@@ -1,0 +1,17 @@
+{
+  "name": "NEcTORa - Video Downloader",
+  "short_name": "NEcTORa",
+  "description": "High-speed video downloader and media intelligence analyzer for Instagram, TikTok, Facebook, and direct media URLs.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
