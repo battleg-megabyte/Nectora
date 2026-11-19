@@ -1,13 +1,38 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
-  <rect width="512" height="512" rx="128" fill="#09090B"/>
-  <rect x="24" y="24" width="464" height="464" rx="104" stroke="#27272A" stroke-width="8"/>
   <defs>
-    <linearGradient id="nectora_grad" x1="64" y1="64" x2="448" y2="448" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#06B6D4"/>
-      <stop offset="0.5" stop-color="#3B82F6"/>
-      <stop offset="1" stop-color="#6366F1"/>
+    <linearGradient id="wk_bg" x1="32" y1="32" x2="480" y2="480" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#170E1D"/>
+      <stop offset="1" stop-color="#08070B"/>
+    </linearGradient>
+    <linearGradient id="wk_pink" x1="110" y1="72" x2="380" y2="430" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F472B6"/>
+      <stop offset="0.5" stop-color="#EC4899"/>
+      <stop offset="1" stop-color="#BE185D"/>
+    </linearGradient>
+    <linearGradient id="wk_rose_gold" x1="156" y1="168" x2="356" y2="210" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FDA4AF"/>
+      <stop offset="0.5" stop-color="#FB7185"/>
+      <stop offset="1" stop-color="#E11D48"/>
     </linearGradient>
   </defs>
-  <path d="M256 120L380 340H132L256 120Z" fill="url(#nectora_grad)" opacity="0.9"/>
-  <path d="M256 200V320M200 264L256 320L312 264" stroke="#FFFFFF" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Obsidian Frame + Crisp Pink Hairline Rim -->
+  <rect width="512" height="512" rx="116" fill="url(#wk_bg)"/>
+  <rect x="18" y="18" width="476" height="476" rx="100" stroke="#362140" stroke-width="8"/>
+  <rect x="34" y="34" width="444" height="444" rx="86" stroke="#EC4899" stroke-opacity="0.32" stroke-width="2.5"/>
+
+  <!-- Monkey King Flame Hair Silhouette with Hot Pink Edge Highlights -->
+  <path d="M236 68C196 112 172 146 154 176L122 152C116 196 126 236 142 266L128 310L164 388L252 442L218 378L304 398L372 316L364 252L394 204L354 166C342 126 306 96 236 68Z" fill="#0F0B14" stroke="url(#wk_pink)" stroke-width="14" stroke-linejoin="round"/>
+
+  <!-- Glowing Pink Eyes -->
+  <path d="M174 246L236 274L216 296L170 272Z" fill="#F472B6"/>
+  <path d="M338 246L276 274L296 296L342 272Z" fill="#F472B6"/>
+
+  <!-- Swirled Jingu Headband -->
+  <path d="M164 196C198 208 228 204 242 192C250 184 244 170 230 172C218 174 218 188 228 192" stroke="url(#wk_rose_gold)" stroke-width="14" stroke-linecap="round"/>
+  <path d="M348 196C314 208 284 204 270 192C262 184 268 170 282 172C294 174 294 188 284 192" stroke="url(#wk_rose_gold)" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- Integrated Download Mark -->
+  <path d="M256 308V392" stroke="#F472B6" stroke-width="16" stroke-linecap="round"/>
+  <path d="M220 358L256 396L292 358" stroke="#FDF2F8" stroke-width="16" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

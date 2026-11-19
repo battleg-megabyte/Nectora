@@ -9,13 +9,8 @@ import {
   Check,
   Copy,
   ExternalLink,
-  Sparkles,
-  Instagram,
+  ScanSearch,
   Film,
-  Video,
-  Globe,
-  Twitter,
-  MessageSquare,
   CheckCircle2,
   AlertCircle,
   Music,
@@ -27,10 +22,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { MediaMetadata, QualityOption, DownloadHistoryItem } from '../types';
+import { PlatformIcon } from './PlatformIcon';
 
 interface MediaResultCardProps {
   media: MediaMetadata;
-  preferredResolution?: '480p' | '720p' | '1080p';
+  preferredResolution?: '360p' | '480p' | '720p' | '1080p';
   onSaveHistory: (item: DownloadHistoryItem) => void;
   onOpenAiAnalysis: () => void;
   onRegisterBlob?: (streamUrl: string, blobUrl: string) => void;
@@ -70,7 +66,10 @@ export function MediaResultCard({
   } | null>(null);
   const [downloadSuccessId, setDownloadSuccessId] = useState<string | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [streamFilter, setStreamFilter] = useState<'all' | 'video' | 'audio'>('all');
   const [hasVideoError, setHasVideoError] = useState(false);
+  const [hasThumbError, setHasThumbError] = useState(false);
+  const [hasAvatarError, setHasAvatarError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -92,7 +91,10 @@ export function MediaResultCard({
 
   useEffect(() => {
     setSelectedQuality(findPreferredQuality(media, preferredResolution));
+    setStreamFilter('all');
     setHasVideoError(false);
+    setHasThumbError(false);
+    setHasAvatarError(false);
     setIsPlaying(false);
     setCurrentTime(0);
     setDuration(0);
@@ -140,20 +142,7 @@ export function MediaResultCard({
   };
 
   const renderPlatformIcon = () => {
-    switch (media.platform) {
-      case 'instagram':
-        return <Instagram className="w-4 h-4 text-pink-400" />;
-      case 'tiktok':
-        return <Film className="w-4 h-4 text-cyan-400" />;
-      case 'facebook':
-        return <Video className="w-4 h-4 text-blue-400" />;
-      case 'twitter':
-        return <Twitter className="w-4 h-4 text-sky-400" />;
-      case 'reddit':
-        return <MessageSquare className="w-4 h-4 text-orange-400" />;
-      default:
-        return <Globe className="w-4 h-4 text-pink-400" />;
-    }
+    return <PlatformIcon platform={media.platform} className="w-4 h-4 shrink-0" />;
   };
 
   const handlePlayToggle = () => {
@@ -249,13 +238,26 @@ export function MediaResultCard({
           .replace(/[^a-zA-Z0-9_-]/g, '_')
           .replace(/_+/g, '_')
           .replace(/^_+|_+$/g, '')
-          .slice(0, 45) || 'nectora_media';
+          .slice(0, 45) || 'wukong_vid_media';
 
-      const fileExt = quality.format.toLowerCase() === 'mp3' ? 'mp3' : 'mp4';
-      const cleanFilename = `${cleanTitle}_${quality.resolution}.${fileExt}`;
+      const normalizedFmt = quality.format.toLowerCase();
+      const fileExt: 'mp3' | 'm4a' | 'webm' | 'mp4' =
+        normalizedFmt === 'mp3'
+          ? 'mp3'
+          : normalizedFmt === 'm4a'
+            ? 'm4a'
+            : normalizedFmt === 'webm'
+              ? 'webm'
+              : 'mp4';
+      const isAudioFormat = fileExt === 'mp3' || fileExt === 'm4a';
+      const cleanFilename = `${cleanTitle}_${isAudioFormat && quality.bitrateKbps ? `${quality.bitrateKbps}kbps` : quality.resolution}.${fileExt}`;
       const audioParam = quality.audioUrl ? `&audioUrl=${encodeURIComponent(quality.audioUrl)}` : '';
       const sizeParam = quality.fileSizeBytes ? `&fileSizeBytes=${quality.fileSizeBytes}` : '';
-      const downloadEndpoint = `/api/download?url=${encodeURIComponent(quality.url)}${audioParam}&filename=${encodeURIComponent(cleanFilename)}&format=${fileExt}&resolution=${quality.resolution}${sizeParam}`;
+      const bitrateParam =
+        isAudioFormat && quality.bitrateKbps ? `&bitrate=${quality.bitrateKbps}k` : '';
+      const scaleParam =
+        !isAudioFormat && quality.targetHeight ? `&scaleHeight=${quality.targetHeight}` : '';
+      const downloadEndpoint = `/api/download?url=${encodeURIComponent(quality.url)}${audioParam}&filename=${encodeURIComponent(cleanFilename)}&format=${fileExt}&resolution=${quality.resolution}${sizeParam}${bitrateParam}${scaleParam}`;
 
       const response = await fetch(downloadEndpoint, { signal: controller.signal });
       if (!response.ok) {
@@ -328,8 +330,8 @@ export function MediaResultCard({
 
       if (receivedBytes <= 0) {
         throw new Error(
-          fileExt === 'mp3'
-            ? 'MP3 audio stream returned 0 bytes. This clip may have no audio track or the source expired.'
+          isAudioFormat
+            ? `${fileExt.toUpperCase()} audio stream returned 0 bytes. This clip may have no audio track or the source expired.`
             : 'Video stream returned 0 bytes. Please try re-extracting the URL.'
         );
       }
@@ -344,7 +346,14 @@ export function MediaResultCard({
         formattedSpeed: 'Saved',
       });
 
-      const mimeType = fileExt === 'mp3' ? 'audio/mpeg' : 'video/mp4';
+      const mimeType =
+        fileExt === 'mp3'
+          ? 'audio/mpeg'
+          : fileExt === 'm4a'
+            ? 'audio/mp4'
+            : fileExt === 'webm'
+              ? 'video/webm'
+              : 'video/mp4';
       const blob = new Blob(chunks, { type: mimeType });
       const blobUrl = window.URL.createObjectURL(blob);
       const file = new File([blob], cleanFilename, { type: mimeType });
@@ -362,6 +371,12 @@ export function MediaResultCard({
 
       onRegisterBlob?.(quality.url, blobUrl);
 
+      const isMobile =
+        typeof navigator !== 'undefined' &&
+        /Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        );
+
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = blobUrl;
@@ -369,13 +384,22 @@ export function MediaResultCard({
       a.setAttribute('download', cleanFilename);
       document.body.appendChild(a);
       a.click();
-      setTimeout(() => a.remove(), 500);
+      setTimeout(() => a.remove(), 1500);
 
-      const finalSizeFormatted = quality.fileSizeFormatted || formatBytes(receivedBytes);
+      if (isMobile) {
+        const hiddenFrame = document.createElement('iframe');
+        hiddenFrame.style.display = 'none';
+        hiddenFrame.setAttribute('aria-hidden', 'true');
+        hiddenFrame.src = downloadEndpoint;
+        document.body.appendChild(hiddenFrame);
+        setTimeout(() => hiddenFrame.remove(), 60000);
+      }
+
+      const finalSizeFormatted = formatBytes(receivedBytes) || quality.fileSizeFormatted || '';
 
       setDownloadNotification({
         open: true,
-        title: media.title || (fileExt === 'mp3' ? 'Downloaded Audio' : 'Downloaded Video'),
+        title: media.title || (isAudioFormat ? 'Downloaded Audio' : 'Downloaded Video'),
         blobUrl,
         downloadEndpoint,
         file,
@@ -385,7 +409,7 @@ export function MediaResultCard({
         resolution: quality.resolution,
         sizeFormatted: finalSizeFormatted,
         platform: media.platform,
-        isAudioOnly: fileExt === 'mp3',
+        isAudioOnly: isAudioFormat,
       });
 
       setTimeout(() => {
@@ -428,14 +452,17 @@ export function MediaResultCard({
     }
   };
 
+  const isSelectedAudio =
+    selectedQuality?.format === 'mp3' || selectedQuality?.format === 'm4a';
+
   const previewSource = selectedQuality?.url
     ? `/api/proxy-media?url=${encodeURIComponent(selectedQuality.url)}${
         selectedQuality.audioUrl ? `&audioUrl=${encodeURIComponent(selectedQuality.audioUrl)}` : ''
-      }${selectedQuality.format === 'mp3' ? '&format=mp3' : ''}`
+      }${isSelectedAudio ? `&format=${selectedQuality.format}` : ''}`
     : '';
 
   const isDownloadedCurrent =
-    downloadNotification && downloadNotification.resolution === selectedQuality.resolution;
+    downloadNotification && downloadNotification.qualityLabel === selectedQuality.label;
 
   const progressRingCircumference = 2 * Math.PI * 16;
   const progressRingOffset =
@@ -443,58 +470,70 @@ export function MediaResultCard({
     ((downloadProgress?.percentage || 0) / 100) * progressRingCircumference;
 
   const audioQuality = media.qualities.find((q) => q.format.toLowerCase() === 'mp3');
+  const videoCount = media.qualities.filter(
+    (q) => q.format !== 'mp3' && q.format !== 'm4a'
+  ).length;
+  const audioCount = media.qualities.filter(
+    (q) => q.format === 'mp3' || q.format === 'm4a'
+  ).length;
+  const visibleQualities = media.qualities.filter((q) => {
+    const isAud = q.format === 'mp3' || q.format === 'm4a';
+    if (streamFilter === 'video') return !isAud;
+    if (streamFilter === 'audio') return isAud;
+    return true;
+  });
 
   return (
     <motion.section
       id="media-result-card"
       aria-label="Extracted media details"
-      initial={{ opacity: 0, y: 18 }}
+      initial={{ opacity: 0, y: 14 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -12 }}
-      transition={{ type: 'spring', stiffness: 320, damping: 28 }}
-      className="w-full max-w-4xl mx-auto mt-8 bg-[#191C26] rounded-2xl border border-pink-400/30 shadow-2xl shadow-black/45 overflow-hidden"
+      exit={{ opacity: 0, y: -10 }}
+      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+      className="w-full max-w-4xl mx-auto mt-8 wk-box rounded-2xl overflow-hidden"
     >
       {/* Top Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-b border-white/[0.1]">
-        <div className="flex items-center gap-2 text-xs text-zinc-300">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-b border-rose-300/15 bg-[#0D060C]">
+        <div className="flex items-center gap-2 text-xs text-rose-100/80 min-w-0">
           {renderPlatformIcon()}
           <span className="font-semibold text-white capitalize">{media.platform}</span>
-          <span className="text-zinc-500" aria-hidden="true">
+          <span className="text-rose-300/35" aria-hidden="true">
             ·
           </span>
-          <span className="capitalize">{media.sourceType.replace('_', ' ')}</span>
+          <span className="capitalize truncate">{media.sourceType.replace('_', ' ')}</span>
           {media.durationFormatted && (
             <>
-              <span className="text-zinc-500" aria-hidden="true">
+              <span className="text-rose-300/35" aria-hidden="true">
                 ·
               </span>
-              <span className="font-mono text-pink-200 tabular-nums">
+              <span className="font-mono text-white tabular-nums shrink-0">
                 {media.durationFormatted}
               </span>
             </>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={onOpenAiAnalysis}
-            className="flex items-center gap-1.5 px-3 min-h-[38px] rounded-xl text-xs font-medium bg-pink-400/20 hover:bg-pink-400/30 text-pink-200 border border-pink-400/40 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-medium bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 hover:border-pink-400/55 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>AI Insights</span>
+            <ScanSearch className="w-3.5 h-3.5 text-rose-400" />
+            <span>Media Insights</span>
           </button>
 
           <button
             type="button"
             onClick={handleCopyDirectLink}
-            className="flex items-center gap-1.5 px-3 min-h-[38px] rounded-xl text-xs font-medium bg-white/[0.07] hover:bg-white/[0.12] text-zinc-200 border border-white/[0.12] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-medium bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 hover:border-pink-400/55 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             title="Copy direct stream URL"
           >
             {copiedLink ? (
               <Check className="w-3.5 h-3.5 text-emerald-400" />
             ) : (
-              <Copy className="w-3.5 h-3.5 text-zinc-300" />
+              <Copy className="w-3.5 h-3.5 text-rose-200" />
             )}
             <span className="hidden sm:inline">{copiedLink ? 'Copied' : 'Copy URL'}</span>
           </button>
@@ -505,22 +544,24 @@ export function MediaResultCard({
       <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-12 gap-6 sm:gap-7 items-start">
         {/* Left Column: Video Preview Stage */}
         <div className="md:col-span-5 flex flex-col">
-          <div className="relative aspect-[9/16] max-h-[380px] sm:max-h-[440px] w-full rounded-xl overflow-hidden bg-[#0E1017] border border-white/[0.12] flex items-center justify-center group">
-            {selectedQuality.format === 'mp3' ? (
-              <div className="flex flex-col items-center justify-center text-center gap-4 p-6 w-full h-full bg-gradient-to-b from-pink-500/15 via-[#161923] to-[#11131B]">
-                <div className="w-16 h-16 rounded-2xl bg-pink-400/20 border border-pink-400/40 flex items-center justify-center text-pink-300 shadow-lg shadow-pink-500/20">
+          <div className="relative aspect-[9/16] max-h-[320px] sm:max-h-[420px] max-w-[280px] md:max-w-none mx-auto w-full rounded-xl overflow-hidden bg-[#090409] border border-rose-300/25 flex items-center justify-center group">
+            {isSelectedAudio ? (
+              <div className="flex flex-col items-center justify-center text-center gap-4 p-6 w-full h-full bg-[#0D060C]">
+                <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-400/35 flex items-center justify-center text-rose-400">
                   <Music className="w-8 h-8" />
                 </div>
                 <div className="space-y-1 max-w-xs">
-                  <p className="text-sm font-semibold text-white">MP3 Audio Preview</p>
-                  <p className="text-xs text-zinc-300 line-clamp-2">{selectedQuality.label}</p>
+                  <p className="text-sm font-semibold text-white">
+                    {selectedQuality.format.toUpperCase()} Audio Preview
+                  </p>
+                  <p className="text-xs text-rose-100/65 line-clamp-2">{selectedQuality.label}</p>
                 </div>
                 {previewSource && (
                   <audio
                     src={previewSource}
                     controls
                     preload="metadata"
-                    className="w-full max-w-[280px] rounded-xl"
+                    className="w-full max-w-[280px] rounded-lg"
                   />
                 )}
               </div>
@@ -545,11 +586,12 @@ export function MediaResultCard({
                   if (videoRef.current) setDuration(videoRef.current.duration);
                 }}
               />
-            ) : media.thumbnailUrl ? (
+            ) : media.thumbnailUrl && !hasThumbError ? (
               <div className="relative w-full h-full">
                 <img
                   src={media.thumbnailUrl}
                   alt={media.title}
+                  onError={() => setHasThumbError(true)}
                   className="w-full h-full object-cover"
                   referrerPolicy="no-referrer"
                 />
@@ -560,28 +602,28 @@ export function MediaResultCard({
                 </div>
               </div>
             ) : (
-              <div className="flex flex-col items-center justify-center text-zinc-400 gap-2 p-6">
-                <Music className="w-10 h-10 text-pink-300/80" />
+              <div className="flex flex-col items-center justify-center text-slate-400 gap-2 p-6">
+                <Music className="w-10 h-10 text-rose-400/80" />
                 <span className="text-xs">Audio Stream</span>
               </div>
             )}
 
             {/* Center Play Button Overlay when paused */}
-            {selectedQuality.format !== 'mp3' && !isPlaying && !hasVideoError && (
+            {!isSelectedAudio && !isPlaying && !hasVideoError && (
               <button
                 type="button"
                 onClick={handlePlayToggle}
                 aria-label="Play video preview"
                 className="absolute inset-0 flex items-center justify-center bg-black/25 hover:bg-black/35 transition-colors cursor-pointer"
               >
-                <span className="w-14 h-14 rounded-full bg-pink-600 hover:bg-pink-500 text-white flex items-center justify-center shadow-2xl shadow-pink-950/60 transition-transform group-hover:scale-105">
+                <span className="w-14 h-14 rounded-full bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/40 flex items-center justify-center shadow-lg transition-transform group-hover:scale-105">
                   <Play className="w-5 h-5 fill-current ml-0.5" />
                 </span>
               </button>
             )}
 
             {/* Bottom Studio Transport Scrubber */}
-            {selectedQuality.format !== 'mp3' && !hasVideoError && (
+            {!isSelectedAudio && !hasVideoError && (
               <div
                 className={`absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent pt-8 pb-3 px-3 transition-opacity ${
                   isPlaying ? 'opacity-100' : 'opacity-100 sm:opacity-0 sm:group-hover:opacity-100'
@@ -596,7 +638,7 @@ export function MediaResultCard({
                     value={currentTime}
                     onChange={handleSeek}
                     aria-label="Seek video"
-                    className="w-full h-1.5 mb-2.5 accent-pink-500 cursor-pointer"
+                    className="w-full h-1.5 mb-2.5 accent-rose-500 cursor-pointer"
                   />
                 )}
                 <div className="flex items-center justify-between gap-2">
@@ -605,7 +647,7 @@ export function MediaResultCard({
                       type="button"
                       onClick={handlePlayToggle}
                       aria-label={isPlaying ? 'Pause' : 'Play'}
-                      className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg bg-white/15 hover:bg-pink-500/35 text-white transition-colors cursor-pointer"
+                      className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg bg-white/15 hover:bg-rose-500/45 text-white transition-colors cursor-pointer"
                     >
                       {isPlaying ? (
                         <Pause className="w-4 h-4" />
@@ -614,7 +656,7 @@ export function MediaResultCard({
                       )}
                     </button>
                     {duration > 0 && (
-                      <span className="text-[11px] font-mono text-zinc-200 tabular-nums">
+                      <span className="text-[11px] font-mono text-white tabular-nums">
                         {formatTime(currentTime)} / {formatTime(duration)}
                       </span>
                     )}
@@ -649,28 +691,29 @@ export function MediaResultCard({
 
           {/* Creator Info */}
           <div className="flex items-center gap-3 mt-3.5 px-1">
-            {media.author.avatarUrl ? (
+            {media.author.avatarUrl && !hasAvatarError ? (
               <img
                 src={media.author.avatarUrl}
                 alt={media.author.name}
-                className="w-8 h-8 rounded-full border border-pink-500/25 object-cover shrink-0"
+                onError={() => setHasAvatarError(true)}
+                className="w-8 h-8 rounded-full border border-rose-300/40 object-cover shrink-0"
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <div className="w-8 h-8 rounded-full bg-pink-500/15 border border-pink-400/25 flex items-center justify-center text-xs font-semibold text-pink-300 shrink-0">
+              <div className="w-8 h-8 rounded-full bg-rose-500/15 border border-rose-300/35 flex items-center justify-center text-xs font-semibold text-rose-200 shrink-0">
                 {media.author.name.charAt(0).toUpperCase()}
               </div>
             )}
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-zinc-100 truncate">{media.author.name}</p>
-              <p className="text-[11px] text-zinc-500 truncate">@{media.author.username}</p>
+              <p className="text-xs font-semibold text-white truncate">{media.author.name}</p>
+              <p className="text-[11px] text-rose-100/50 truncate">@{media.author.username}</p>
             </div>
             {media.author.profileUrl && (
               <a
                 href={media.author.profileUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-zinc-400 hover:text-pink-300 hover:bg-white/[0.06] transition-colors"
+                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors"
                 title="View original profile"
                 aria-label="View original profile"
               >
@@ -681,34 +724,59 @@ export function MediaResultCard({
         </div>
 
         {/* Right Column: Title, Stream Quality Matrix & Animated Download Controls */}
-        <div className="md:col-span-7 flex flex-col justify-between space-y-5">
+        <div className="md:col-span-7 flex flex-col justify-between space-y-5 min-w-0">
           <div>
-            <h2 className="font-display text-lg sm:text-xl font-semibold text-white leading-snug line-clamp-2">
+            <h2 className="font-display text-lg sm:text-xl font-semibold text-white leading-snug line-clamp-2 break-words">
               {media.title}
             </h2>
             {media.description && (
-              <p className="text-xs text-zinc-400 mt-1.5 line-clamp-2 leading-relaxed">
+              <p className="text-xs text-rose-100/65 mt-1.5 line-clamp-2 leading-relaxed break-words">
                 {media.description}
               </p>
             )}
 
             {/* Stream Quality Matrix */}
             <div className="mt-5">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium text-zinc-300">
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5">
+                <span className="text-xs font-medium text-white">
                   Available streams ({media.qualities.length})
                 </span>
-                <span className="text-[11px] font-mono text-zinc-400 hidden sm:inline">
-                  Tap row to preview
-                </span>
+                <div
+                  role="tablist"
+                  aria-label="Filter stream formats"
+                  className="inline-flex items-center gap-1 p-0.5 rounded-lg bg-[#0D060C] border border-rose-300/20"
+                >
+                  {[
+                    { id: 'all' as const, label: `All (${media.qualities.length})` },
+                    { id: 'video' as const, label: `Video (${videoCount})` },
+                    { id: 'audio' as const, label: `Audio (${audioCount})` },
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={streamFilter === tab.id}
+                      onClick={() => setStreamFilter(tab.id)}
+                      className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors cursor-pointer ${
+                        streamFilter === tab.id
+                          ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white'
+                          : 'text-rose-100/60 hover:text-white'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="rounded-xl border border-white/[0.12] bg-[#131620] divide-y divide-white/[0.09] overflow-hidden">
-                {media.qualities.map((quality) => {
+              <div className="rounded-xl border border-rose-300/20 bg-[#0D060C] divide-y divide-rose-300/15 max-h-[340px] overflow-y-auto">
+                {visibleQualities.map((quality) => {
                   const isSelected = selectedQuality.id === quality.id;
                   const isDownloading = downloadingId === quality.id;
                   const isCompleted = downloadSuccessId === quality.id;
-                  const isMp3 = quality.format.toLowerCase() === 'mp3';
+                  const isAudioRow =
+                    quality.format.toLowerCase() === 'mp3' ||
+                    quality.format.toLowerCase() === 'm4a';
 
                   return (
                     <div
@@ -722,33 +790,39 @@ export function MediaResultCard({
                           handleQualitySelect(quality);
                         }
                       }}
-                      className={`flex items-center justify-between px-3.5 sm:px-4 py-3 cursor-pointer transition-colors gap-3 ${
-                        isSelected ? 'bg-pink-400/[0.14]' : 'hover:bg-white/[0.05]'
+                      className={`flex items-center justify-between px-3 sm:px-4 py-2.5 cursor-pointer transition-colors gap-2 sm:gap-3 ${
+                        isSelected ? 'bg-rose-500/[0.10]' : 'hover:bg-rose-400/[0.04]'
                       }`}
                     >
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                         <span
                           className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
-                            isSelected ? 'border-pink-300' : 'border-zinc-500'
+                            isSelected ? 'border-rose-400' : 'border-rose-200/35'
                           }`}
                         >
                           {isSelected && (
                             <motion.span
                               layoutId="selected-quality-dot"
-                              className="w-2 h-2 rounded-full bg-pink-300"
+                              className="w-2 h-2 rounded-full bg-rose-400"
                             />
                           )}
                         </span>
 
                         <div className="min-w-0">
-                          <span className="text-sm font-semibold text-white flex items-center gap-1.5 truncate">
-                            {isMp3 && <Music className="w-3.5 h-3.5 text-pink-300 shrink-0" />}
+                          <span className="text-xs sm:text-sm font-semibold text-white flex items-center gap-1.5 truncate">
+                            {isAudioRow && <Music className="w-3.5 h-3.5 text-rose-400 shrink-0" />}
                             <span className="truncate">{quality.label}</span>
                           </span>
-                          <div className="flex items-center gap-2 text-xs text-zinc-400 mt-0.5 font-mono tabular-nums">
-                            <span className={`uppercase ${isMp3 ? 'text-pink-200 font-semibold' : 'text-zinc-300'}`}>
+                          <div className="flex items-center gap-1.5 sm:gap-2 text-[11px] sm:text-xs text-rose-100/60 mt-0.5 font-mono tabular-nums flex-wrap">
+                            <span className={`uppercase ${isAudioRow ? 'text-rose-300 font-semibold' : 'text-pink-200'}`}>
                               {quality.format}
                             </span>
+                            {quality.codec && (
+                              <>
+                                <span aria-hidden="true">·</span>
+                                <span className="text-rose-100/65">{quality.codec}</span>
+                              </>
+                            )}
                             {quality.fileSizeFormatted && (
                               <>
                                 <span aria-hidden="true">·</span>
@@ -772,7 +846,7 @@ export function MediaResultCard({
                             e.stopPropagation();
                             handleCancelDownload();
                           }}
-                          className="flex items-center gap-1.5 px-3.5 min-h-[40px] rounded-xl text-xs font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/40 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                          className="flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-200 border border-red-500/35 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                           title="Stop download"
                         >
                           <Square className="w-3 h-3 fill-current" />
@@ -786,12 +860,12 @@ export function MediaResultCard({
                             handleQualitySelect(quality);
                             handleDownload(quality);
                           }}
-                          className={`flex items-center gap-1.5 px-3.5 min-h-[40px] rounded-xl text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          className={`flex items-center gap-1.5 px-3 sm:px-3.5 min-h-[38px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                             isCompleted
                               ? 'bg-emerald-500/20 text-emerald-200 border border-emerald-400/40'
                               : isSelected
-                                ? 'bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white shadow-sm shadow-pink-500/25'
-                                : 'bg-white/[0.08] hover:bg-pink-500/20 hover:border-pink-400/40 text-zinc-100 border border-white/[0.12]'
+                                ? 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25'
+                                : 'bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20'
                           }`}
                         >
                           {isCompleted ? (
@@ -802,7 +876,11 @@ export function MediaResultCard({
                           ) : (
                             <>
                               <Download className="w-3.5 h-3.5" />
-                              <span>{isMp3 ? 'MP3' : quality.resolution}</span>
+                              <span>
+                                {isAudioRow
+                                  ? `${quality.format.toUpperCase()}${quality.bitrateKbps ? ` ${quality.bitrateKbps}k` : ''}`
+                                  : quality.resolution}
+                              </span>
                             </>
                           )}
                         </button>
@@ -814,15 +892,15 @@ export function MediaResultCard({
             </div>
           </div>
 
-          {/* Animated Live Transfer Progress Ring + Transfer Wave */}
+          {/* Live Transfer Progress Panel */}
           <AnimatePresence>
             {downloadProgress && (
               <motion.div
-                initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -6, scale: 0.98 }}
-                transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-                className="p-4 rounded-xl bg-[#131620] border border-pink-400/45 shadow-lg shadow-pink-950/25 text-xs space-y-3"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="p-4 rounded-xl bg-[#0D060C] border border-rose-300/25 text-xs space-y-3"
               >
                 <div className="flex items-center justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
@@ -834,7 +912,7 @@ export function MediaResultCard({
                           cy="20"
                           r="16"
                           fill="none"
-                          stroke="rgba(255,255,255,0.12)"
+                          stroke="rgba(255,255,255,0.1)"
                           strokeWidth="3"
                         />
                         <motion.circle
@@ -842,7 +920,7 @@ export function MediaResultCard({
                           cy="20"
                           r="16"
                           fill="none"
-                          stroke="#F472B6"
+                          stroke="#FB7185"
                           strokeWidth="3"
                           strokeLinecap="round"
                           strokeDasharray={progressRingCircumference}
@@ -850,22 +928,16 @@ export function MediaResultCard({
                           transition={{ duration: 0.15, ease: 'easeOut' }}
                         />
                       </svg>
-                      <span className="absolute text-[10px] font-mono font-bold text-pink-200 tabular-nums">
+                      <span className="absolute text-[10px] font-mono font-bold text-white tabular-nums">
                         {downloadProgress.percentage}%
                       </span>
                     </div>
 
                     <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="relative flex h-2 w-2 shrink-0">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-pink-300 opacity-80" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-pink-400" />
-                        </span>
-                        <span className="font-semibold text-white truncate">
-                          Downloading {selectedQuality.label}
-                        </span>
-                      </div>
-                      <p className="text-[11px] font-mono text-zinc-300 tabular-nums mt-0.5">
+                      <p className="font-semibold text-white truncate">
+                        Downloading {selectedQuality.label}
+                      </p>
+                      <p className="text-[11px] font-mono text-rose-100/65 tabular-nums mt-0.5">
                         {downloadProgress.formattedReceived} / {downloadProgress.formattedTotal}
                         {downloadProgress.formattedSpeed
                           ? ` · ${downloadProgress.formattedSpeed}`
@@ -878,31 +950,31 @@ export function MediaResultCard({
                     id="btn-stop-download-card"
                     type="button"
                     onClick={handleCancelDownload}
-                    className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/40 font-sans font-semibold transition-colors shrink-0 cursor-pointer"
+                    className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-red-500/15 hover:bg-red-500/25 text-red-200 border border-red-500/35 font-sans font-semibold transition-colors shrink-0 cursor-pointer"
                   >
                     <Square className="w-3 h-3 fill-current" />
                     <span>Stop</span>
                   </button>
                 </div>
 
-                {/* Animated Pink Gradient Progress Wave */}
-                <div className="w-full h-2 bg-white/[0.1] rounded-full overflow-hidden">
+                {/* Crisp Progress Track */}
+                <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
                   <motion.div
-                    className="h-full bg-gradient-to-r from-pink-500 via-pink-300 to-rose-300 rounded-full animate-shimmer"
+                    className="h-full bg-gradient-to-r from-rose-500 via-pink-400 to-white rounded-full"
                     initial={{ width: '4%' }}
                     animate={{ width: `${Math.max(4, downloadProgress.percentage)}%` }}
                     transition={{ duration: 0.15, ease: 'easeOut' }}
                   />
                 </div>
 
-                <div className="flex items-center justify-between text-[11px] text-zinc-400 font-mono tabular-nums">
-                  <span>
-                    {selectedQuality.format === 'mp3'
-                      ? 'Preparing 320kbps MP3 audio'
-                      : 'Transferring MP4 chunks'}
+                <div className="flex items-center justify-between text-[11px] text-rose-100/65 font-mono tabular-nums">
+                  <span className="truncate pr-2">
+                    {isSelectedAudio
+                      ? `Preparing ${selectedQuality.bitrateKbps || 320}kbps ${selectedQuality.format.toUpperCase()} audio`
+                      : `Transferring ${selectedQuality.resolution} ${selectedQuality.format.toUpperCase()} chunks`}
                   </span>
-                  <span className="text-pink-200">
-                    {downloadProgress.percentage === 100 ? 'Building file...' : 'Live stream'}
+                  <span className="text-white shrink-0">
+                    {downloadProgress.percentage === 100 ? 'Building file...' : 'Transferring'}
                   </span>
                 </div>
               </motion.div>
@@ -913,27 +985,27 @@ export function MediaResultCard({
           <AnimatePresence>
             {isDownloadedCurrent && !downloadProgress && downloadNotification && (
               <motion.div
-                initial={{ opacity: 0, y: 8, scale: 0.98 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-                className="p-3.5 rounded-xl bg-pink-400/15 border border-pink-400/40 flex flex-wrap items-center justify-between gap-3"
+                transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                className="p-3.5 rounded-xl bg-[#0D060C] border border-emerald-500/40 flex flex-wrap items-center justify-between gap-3"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <motion.div
-                    initial={{ scale: 0.6 }}
-                    animate={{ scale: 1 }}
-                    transition={{ type: 'spring', stiffness: 480, damping: 20 }}
-                    className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center shrink-0"
-                  >
-                    <CheckCircle2 className="w-4 h-4 text-emerald-300" />
-                  </motion.div>
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/35 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  </div>
                   <div className="min-w-0">
                     <p className="text-xs font-semibold text-white truncate">
                       Saved {downloadNotification.resolution}{' '}
-                      {downloadNotification.isAudioOnly ? 'MP3' : 'MP4'} to device
+                      {downloadNotification.isAudioOnly
+                        ? downloadNotification.filename.toLowerCase().endsWith('.m4a')
+                          ? 'M4A'
+                          : 'MP3'
+                        : 'MP4'}{' '}
+                      to device
                     </p>
-                    <p className="text-[11px] font-mono text-pink-100/90 tabular-nums">
+                    <p className="text-[11px] font-mono text-rose-100/65 tabular-nums">
                       {downloadNotification.sizeFormatted} ·{' '}
                       {downloadNotification.isAudioOnly ? 'Ready to listen' : 'Ready to watch'}
                     </p>
@@ -943,28 +1015,34 @@ export function MediaResultCard({
                   <button
                     type="button"
                     onClick={() => setPreviewDownloadedModal(true)}
-                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 min-h-[40px] rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white text-xs font-semibold transition-colors cursor-pointer"
+                    className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 px-4 min-h-[40px] rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>{downloadNotification.isAudioOnly ? 'Play MP3' : 'Watch MP4'}</span>
+                    <span>
+                      {downloadNotification.isAudioOnly
+                        ? downloadNotification.filename.toLowerCase().endsWith('.m4a')
+                          ? 'Play M4A'
+                          : 'Play MP3'
+                        : 'Watch MP4'}
+                    </span>
                   </button>
                   <a
-                    href={downloadNotification.downloadEndpoint}
+                    href={downloadNotification.blobUrl}
                     download={downloadNotification.filename}
-                    className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-white border border-white/[0.14] text-xs font-medium transition-colors"
-                    title="Save file directly"
+                    className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-lg bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 text-xs font-medium transition-colors"
+                    title="Save file to device"
                   >
-                    <Download className="w-3.5 h-3.5 text-pink-300" />
+                    <Download className="w-3.5 h-3.5 text-rose-400" />
                     <span>Save</span>
                   </a>
                   {downloadNotification.canShareFile && (
                     <button
                       type="button"
                       onClick={handleShareToDevice}
-                      className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-zinc-100 border border-white/[0.14] text-xs font-medium transition-colors cursor-pointer"
+                      className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-lg bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 text-xs font-medium transition-colors cursor-pointer"
                       title="Open in device Files or Gallery"
                     >
-                      <FolderOpen className="w-3.5 h-3.5 text-pink-300" />
+                      <FolderOpen className="w-3.5 h-3.5 text-pink-400" />
                       <span>Device</span>
                     </button>
                   )}
@@ -972,9 +1050,9 @@ export function MediaResultCard({
                     href={downloadNotification.blobUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-zinc-100 border border-white/[0.14] transition-colors"
-                    title={downloadNotification.isAudioOnly ? 'Open MP3 in new tab' : 'Open MP4 in new tab'}
-                    aria-label={downloadNotification.isAudioOnly ? 'Open downloaded MP3 in new tab' : 'Open downloaded MP4 in new tab'}
+                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 transition-colors"
+                    title={downloadNotification.isAudioOnly ? 'Open audio in new tab' : 'Open MP4 in new tab'}
+                    aria-label={downloadNotification.isAudioOnly ? 'Open downloaded audio in new tab' : 'Open downloaded MP4 in new tab'}
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
@@ -985,35 +1063,46 @@ export function MediaResultCard({
 
           {/* Download Error Banner */}
           {downloadError && (
-            <div className="p-3.5 rounded-xl bg-rose-500/15 border border-rose-400/35 text-rose-100 text-xs flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-rose-300 shrink-0 mt-0.5" />
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold">Download notice</p>
-                <p className="text-rose-100/85 mt-0.5">{downloadError}</p>
+            <div className="p-3.5 rounded-xl bg-red-500/10 border border-red-500/30 text-red-100 text-xs flex flex-wrap items-center justify-between gap-2.5">
+              <div className="flex items-start gap-2.5 flex-1 min-w-[200px]">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-semibold">Download notice</p>
+                  <p className="text-red-200/85 mt-0.5">{downloadError}</p>
+                </div>
               </div>
-              <button
-                type="button"
-                onClick={() => setDownloadError(null)}
-                className="text-rose-200/80 hover:text-white px-2.5 py-1 rounded-lg hover:bg-rose-500/20 transition-colors cursor-pointer"
-              >
-                Dismiss
-              </button>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={`/api/download?url=${encodeURIComponent(selectedQuality.url)}${selectedQuality.audioUrl ? `&audioUrl=${encodeURIComponent(selectedQuality.audioUrl)}` : ''}&filename=${encodeURIComponent(`wukong_vid_${selectedQuality.resolution}.${selectedQuality.format}`)}&format=${selectedQuality.format}${isSelectedAudio && selectedQuality.bitrateKbps ? `&bitrate=${selectedQuality.bitrateKbps}k` : ''}${!isSelectedAudio && selectedQuality.targetHeight ? `&scaleHeight=${selectedQuality.targetHeight}` : ''}`}
+                  download
+                  className="px-3 min-h-[34px] inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 border border-white/25 text-white font-semibold transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Direct Save</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setDownloadError(null)}
+                  className="text-red-200/80 hover:text-white px-2.5 py-1 rounded-lg hover:bg-red-500/20 transition-colors cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
             </div>
           )}
 
           {/* Primary Action Footer */}
-          <div className="pt-4 border-t border-white/[0.1] flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="pt-4 border-t border-rose-300/15 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
             {downloadingId ? (
               <div className="flex-1 flex items-center gap-2">
                 <button
                   id="btn-primary-download-active"
                   type="button"
                   disabled
-                  className="flex-1 flex items-center justify-center gap-2 px-5 min-h-[46px] rounded-xl font-semibold text-sm bg-gradient-to-r from-pink-500 to-rose-500 text-white"
+                  className="flex-1 flex items-center justify-center gap-2 px-5 min-h-[46px] rounded-lg font-semibold text-sm bg-gradient-to-r from-rose-500 to-pink-500 text-white border border-white/25"
                 >
-                  <span className="w-2 h-2 rounded-full bg-white animate-ping" />
                   <span className="font-mono tabular-nums">
-                    {selectedQuality.resolution} ·{' '}
+                    Downloading {selectedQuality.resolution} ·{' '}
                     {downloadProgress?.percentage ? `${downloadProgress.percentage}%` : 'Connecting'}
                   </span>
                 </button>
@@ -1021,7 +1110,7 @@ export function MediaResultCard({
                   id="btn-primary-stop-download"
                   type="button"
                   onClick={handleCancelDownload}
-                  className="flex items-center justify-center gap-1.5 px-4 min-h-[46px] rounded-xl font-semibold text-sm bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/40 transition-colors cursor-pointer"
+                  className="flex items-center justify-center gap-1.5 px-4 min-h-[46px] rounded-lg font-semibold text-sm bg-red-500/15 hover:bg-red-500/25 text-red-200 border border-red-500/35 transition-colors cursor-pointer"
                 >
                   <Square className="w-3.5 h-3.5 fill-current" />
                   <span>Stop</span>
@@ -1033,13 +1122,13 @@ export function MediaResultCard({
                   id="btn-primary-download"
                   type="button"
                   onClick={() => handleDownload(selectedQuality)}
-                  className="flex-1 flex items-center justify-center gap-2 px-6 min-h-[46px] rounded-xl font-semibold text-sm bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white shadow-lg shadow-pink-500/25 transition-all active:scale-[0.99] cursor-pointer"
+                  className="flex-1 flex items-center justify-center gap-2 px-6 min-h-[46px] rounded-lg font-semibold text-sm bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 transition-colors active:scale-[0.99] cursor-pointer shadow-md shadow-rose-950/50"
                 >
                   <Download className="w-4 h-4" />
                   <span>Download {selectedQuality.label}</span>
                 </button>
 
-                {audioQuality && selectedQuality.format !== 'mp3' && (
+                {audioQuality && !isSelectedAudio && (
                   <button
                     id="btn-quick-download-mp3"
                     type="button"
@@ -1047,9 +1136,9 @@ export function MediaResultCard({
                       handleQualitySelect(audioQuality);
                       handleDownload(audioQuality);
                     }}
-                    className="flex items-center justify-center gap-2 px-4 min-h-[46px] rounded-xl font-semibold text-xs bg-pink-400/15 hover:bg-pink-400/25 text-pink-200 border border-pink-400/35 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    className="flex items-center justify-center gap-2 px-4 min-h-[46px] rounded-lg font-semibold text-xs bg-[#0D060C] hover:bg-[#221020] text-white border border-rose-300/20 hover:border-rose-400/55 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                   >
-                    <Music className="w-3.5 h-3.5" />
+                    <Music className="w-3.5 h-3.5 text-rose-400" />
                     <span>Save MP3</span>
                   </button>
                 )}
@@ -1059,7 +1148,7 @@ export function MediaResultCard({
             <button
               type="button"
               onClick={handleCopyDirectLink}
-              className="px-4 min-h-[44px] rounded-xl font-medium text-xs bg-white/[0.07] hover:bg-white/[0.12] text-zinc-100 border border-white/[0.12] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="px-4 min-h-[46px] rounded-lg font-medium text-xs bg-[#0D060C] hover:bg-[#221020] text-white border border-rose-300/20 hover:border-pink-400/55 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               {copiedLink ? 'Link Copied' : 'Copy Stream Link'}
             </button>
@@ -1074,18 +1163,18 @@ export function MediaResultCard({
             id="reel-download-message-toast"
             role="status"
             aria-live="polite"
-            initial={{ opacity: 0, y: 28, scale: 0.94 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 18, scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 360, damping: 26 }}
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
             onClick={() => setPreviewDownloadedModal(true)}
-            className="fixed bottom-4 inset-x-4 sm:inset-x-auto sm:right-5 sm:bottom-5 z-50 sm:w-[400px] p-4 rounded-2xl bg-[#1D202C]/96 backdrop-blur-2xl border border-pink-400/50 shadow-2xl shadow-pink-950/50 cursor-pointer hover:border-pink-300/80 transition-colors"
+            className="fixed bottom-3 inset-x-3 sm:inset-x-auto sm:right-5 sm:bottom-5 z-50 sm:w-[400px] p-4 rounded-2xl wk-box backdrop-blur-xl hover:border-rose-300/55 shadow-2xl cursor-pointer transition-colors"
           >
             <div className="flex items-start gap-3">
-              {/* Thumbnail or Animated File Badge */}
-              <div className="relative w-12 h-14 rounded-xl bg-[#11131B] border border-pink-400/40 overflow-hidden flex items-center justify-center shrink-0">
+              {/* Thumbnail or File Badge */}
+              <div className="relative w-12 h-14 rounded-lg bg-[#090409] border border-rose-300/25 overflow-hidden flex items-center justify-center shrink-0">
                 {downloadNotification.isAudioOnly ? (
-                  <Music className="w-5 h-5 text-pink-300" />
+                  <Music className="w-5 h-5 text-rose-400" />
                 ) : media.thumbnailUrl ? (
                   <img
                     src={media.thumbnailUrl}
@@ -1094,7 +1183,7 @@ export function MediaResultCard({
                     referrerPolicy="no-referrer"
                   />
                 ) : (
-                  <Film className="w-5 h-5 text-pink-300" />
+                  <Film className="w-5 h-5 text-pink-400" />
                 )}
                 {!downloadNotification.isAudioOnly && (
                   <span className="absolute inset-0 bg-black/25 flex items-center justify-center">
@@ -1105,10 +1194,14 @@ export function MediaResultCard({
 
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-pink-200">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-300" />
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-300">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                     <span>
-                      {downloadNotification.isAudioOnly ? 'MP3 Saved to Device' : 'MP4 Saved to Device'}
+                      {downloadNotification.isAudioOnly
+                        ? downloadNotification.filename.toLowerCase().endsWith('.m4a')
+                          ? 'M4A Saved to Device'
+                          : 'MP3 Saved to Device'
+                        : 'MP4 Saved to Device'}
                     </span>
                   </span>
                   <button
@@ -1117,7 +1210,7 @@ export function MediaResultCard({
                       e.stopPropagation();
                       setDownloadNotification((prev) => (prev ? { ...prev, open: false } : null));
                     }}
-                    className="p-1.5 -mr-1 rounded-lg text-zinc-300 hover:text-white hover:bg-white/[0.1] transition-colors cursor-pointer"
+                    className="p-1.5 -mr-1 rounded-lg text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
                     aria-label="Close notification"
                   >
                     <X className="w-3.5 h-3.5" />
@@ -1127,7 +1220,7 @@ export function MediaResultCard({
                 <h4 className="text-sm font-semibold text-white mt-0.5 truncate">
                   {downloadNotification.title}
                 </h4>
-                <p className="text-xs text-zinc-300 mt-0.5 font-mono tabular-nums truncate">
+                <p className="text-xs text-rose-100/65 mt-0.5 font-mono tabular-nums truncate">
                   {downloadNotification.filename} · {downloadNotification.sizeFormatted}
                 </p>
 
@@ -1139,22 +1232,28 @@ export function MediaResultCard({
                       e.stopPropagation();
                       setPreviewDownloadedModal(true);
                     }}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3.5 min-h-[40px] rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white text-xs font-semibold transition-colors cursor-pointer"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3.5 min-h-[40px] rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 text-xs font-semibold transition-colors cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
-                    <span>{downloadNotification.isAudioOnly ? 'Play MP3' : 'Watch MP4'}</span>
+                    <span>
+                      {downloadNotification.isAudioOnly
+                        ? downloadNotification.filename.toLowerCase().endsWith('.m4a')
+                          ? 'Play M4A'
+                          : 'Play MP3'
+                        : 'Watch MP4'}
+                    </span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
 
                   <a
-                    href={downloadNotification.downloadEndpoint}
+                    href={downloadNotification.blobUrl}
                     download={downloadNotification.filename}
                     onClick={(e) => e.stopPropagation()}
-                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-zinc-100 border border-white/[0.14] transition-colors"
-                    title="Save directly to device"
-                    aria-label="Save directly to device"
+                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#0D060C] hover:bg-[#221020] text-white border border-rose-300/20 transition-colors"
+                    title="Save file to device"
+                    aria-label="Save file to device"
                   >
-                    <Download className="w-3.5 h-3.5 text-pink-300" />
+                    <Download className="w-3.5 h-3.5 text-rose-400" />
                   </a>
 
                   {downloadNotification.canShareFile && (
@@ -1164,10 +1263,10 @@ export function MediaResultCard({
                         e.stopPropagation();
                         handleShareToDevice();
                       }}
-                      className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-zinc-100 border border-white/[0.14] text-xs font-medium transition-colors cursor-pointer"
+                      className="flex items-center justify-center gap-1.5 px-3 min-h-[40px] rounded-lg bg-[#0D060C] hover:bg-[#221020] text-white border border-rose-300/20 text-xs font-medium transition-colors cursor-pointer"
                       title="Open in phone Files / Gallery"
                     >
-                      <Share2 className="w-3.5 h-3.5 text-pink-300" />
+                      <Share2 className="w-3.5 h-3.5 text-pink-400" />
                       <span>Device</span>
                     </button>
                   )}
@@ -1177,9 +1276,9 @@ export function MediaResultCard({
                     target="_blank"
                     rel="noopener noreferrer"
                     onClick={(e) => e.stopPropagation()}
-                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-zinc-100 border border-white/[0.14] transition-colors"
-                    title={downloadNotification.isAudioOnly ? 'Open MP3 file in new tab' : 'Open MP4 file in new tab'}
-                    aria-label={downloadNotification.isAudioOnly ? 'Open MP3 file in new tab' : 'Open MP4 file in new tab'}
+                    className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#0D060C] hover:bg-[#221020] text-white border border-rose-300/20 transition-colors"
+                    title={downloadNotification.isAudioOnly ? 'Open audio file in new tab' : 'Open MP4 file in new tab'}
+                    aria-label={downloadNotification.isAudioOnly ? 'Open audio file in new tab' : 'Open MP4 file in new tab'}
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
@@ -1200,26 +1299,26 @@ export function MediaResultCard({
             exit={{ opacity: 0 }}
             transition={{ duration: 0.18 }}
             onClick={() => setPreviewDownloadedModal(false)}
-            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/75 backdrop-blur-md"
+            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/80 backdrop-blur-md"
           >
             <motion.div
-              initial={{ opacity: 0, y: 36, scale: 0.98 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 24, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 32 }}
+              initial={{ opacity: 0, y: 28 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
               onClick={(e) => e.stopPropagation()}
-              className="relative w-full max-w-2xl bg-[#191C26] rounded-t-3xl sm:rounded-2xl border border-pink-400/40 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              className="relative w-full max-w-2xl wk-box rounded-t-2xl sm:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90dvh] sm:max-h-[88dvh]"
             >
               {/* Mobile Sheet Handle */}
               <div className="sm:hidden pt-3 pb-1 flex justify-center">
-                <div className="w-10 h-1 rounded-full bg-zinc-600" />
+                <div className="w-10 h-1 rounded-full bg-rose-300/35" />
               </div>
 
-              <div className="flex items-center justify-between px-5 py-3.5 sm:py-4 border-b border-white/[0.1]">
+              <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 sm:py-4 border-b border-rose-300/15 bg-[#0D060C]">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-pink-400/20 border border-pink-400/40 flex items-center justify-center text-pink-300 shrink-0">
+                  <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-400/35 flex items-center justify-center text-rose-400 shrink-0">
                     {downloadNotification.isAudioOnly ? (
-                      <Music className="w-4 h-4" />
+                      <Music className="w-4 h-4 text-rose-400" />
                     ) : (
                       <Film className="w-4 h-4" />
                     )}
@@ -1228,7 +1327,7 @@ export function MediaResultCard({
                     <h3 className="text-sm font-semibold text-white truncate">
                       {downloadNotification.title}
                     </h3>
-                    <p className="text-xs text-zinc-300 font-mono tabular-nums">
+                    <p className="text-xs text-rose-100/65 font-mono tabular-nums">
                       Device file · {downloadNotification.resolution} ·{' '}
                       {downloadNotification.sizeFormatted}
                     </p>
@@ -1240,9 +1339,9 @@ export function MediaResultCard({
                     <button
                       type="button"
                       onClick={handleShareToDevice}
-                      className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-xl bg-pink-400/20 hover:bg-pink-400/30 text-pink-100 text-xs font-medium border border-pink-400/40 transition-colors cursor-pointer"
+                      className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] text-white text-xs font-medium border border-rose-300/20 transition-colors cursor-pointer"
                     >
-                      <FolderOpen className="w-3.5 h-3.5" />
+                      <FolderOpen className="w-3.5 h-3.5 text-pink-400" />
                       <span className="hidden sm:inline">Open on Device</span>
                     </button>
                   )}
@@ -1250,11 +1349,15 @@ export function MediaResultCard({
                     href={downloadNotification.blobUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-zinc-100 text-xs font-medium border border-white/[0.12] transition-colors"
+                    className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] text-white text-xs font-medium border border-rose-300/20 transition-colors"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">
-                      {downloadNotification.isAudioOnly ? 'Open MP3 Tab' : 'Open MP4 Tab'}
+                      {downloadNotification.isAudioOnly
+                        ? downloadNotification.filename.toLowerCase().endsWith('.m4a')
+                          ? 'Open M4A Tab'
+                          : 'Open MP3 Tab'
+                        : 'Open MP4 Tab'}
                     </span>
                   </a>
                   <button
@@ -1262,21 +1365,23 @@ export function MediaResultCard({
                     type="button"
                     onClick={() => setPreviewDownloadedModal(false)}
                     aria-label="Close player"
-                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-xl text-zinc-300 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+                    className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
                   >
                     <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              <div className="p-4 bg-[#0E1017] flex items-center justify-center overflow-hidden min-h-[260px] sm:min-h-[320px] max-h-[60vh]">
+              <div className="p-4 bg-[#090409] flex items-center justify-center overflow-hidden min-h-[240px] sm:min-h-[320px] max-h-[58dvh]">
                 {downloadNotification.isAudioOnly ? (
                   <div className="flex flex-col items-center justify-center py-10 text-center w-full">
-                    <div className="w-16 h-16 rounded-2xl bg-pink-400/20 border border-pink-400/40 flex items-center justify-center text-pink-300 mb-4 shadow-lg shadow-pink-500/20">
+                    <div className="w-16 h-16 rounded-2xl bg-rose-500/15 border border-rose-400/35 flex items-center justify-center text-rose-400 mb-4">
                       <Music className="w-7 h-7" />
                     </div>
                     <h4 className="text-sm font-semibold text-white mb-3">
-                      Downloaded MP3 Audio Track
+                      {downloadNotification.filename.toLowerCase().endsWith('.m4a')
+                        ? 'Downloaded M4A Audio Track'
+                        : 'Downloaded MP3 Audio Track'}
                     </h4>
                     <audio
                       src={downloadNotification.blobUrl}
@@ -1291,28 +1396,28 @@ export function MediaResultCard({
                     controls
                     autoPlay
                     playsInline
-                    className="max-h-[56vh] max-w-full rounded-xl object-contain bg-black"
+                    className="max-h-[54dvh] max-w-full rounded-xl object-contain bg-black border border-rose-300/20"
                   />
                 )}
               </div>
 
-              <div className="px-5 py-3.5 pb-safe border-t border-white/[0.1] flex flex-wrap items-center justify-between gap-3 text-xs">
-                <span className="font-mono text-zinc-400 truncate max-w-[200px] sm:max-w-xs">
+              <div className="px-4 sm:px-5 py-3.5 pb-safe border-t border-rose-300/15 bg-[#0D060C] flex flex-wrap items-center justify-between gap-3 text-xs">
+                <span className="font-mono text-rose-100/65 truncate max-w-[180px] sm:max-w-xs">
                   {downloadNotification.filename}
                 </span>
                 <div className="flex items-center gap-2 ml-auto">
                   <a
                     href={downloadNotification.blobUrl}
                     download={downloadNotification.filename}
-                    className="flex items-center gap-1.5 px-4 min-h-[40px] rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white font-semibold transition-colors"
+                    className="flex items-center gap-1.5 px-4 min-h-[40px] rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 font-semibold transition-colors"
                   >
                     <Download className="w-3.5 h-3.5" />
-                    <span>Save Again</span>
+                    <span>Save to Device</span>
                   </a>
                   <button
                     type="button"
                     onClick={() => setPreviewDownloadedModal(false)}
-                    className="px-4 min-h-[40px] rounded-xl bg-white/[0.08] hover:bg-white/[0.14] text-zinc-100 font-medium transition-colors cursor-pointer"
+                    className="px-4 min-h-[40px] rounded-lg bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 font-medium transition-colors cursor-pointer"
                   >
                     Close
                   </button>

@@ -42,7 +42,7 @@ export class TwitterAdapter implements PlatformAdapter {
           const fxRes = await fetch(`https://api.fxtwitter.com/status/${statusId}`, {
             signal: AbortSignal.timeout(10000),
             headers: {
-              'User-Agent': 'NEcTORa/2.0 (Media Extractor)',
+              'User-Agent': 'WuKong-Vid/2.0 (Media Extractor)',
               Accept: 'application/json',
             },
           });
@@ -166,8 +166,8 @@ export class TwitterAdapter implements PlatformAdapter {
               }
             }
           }
-        } catch (fxErr) {
-          console.warn('FxTwitter API notice:', fxErr);
+        } catch {
+          // Continue to next Twitter extraction fallback
         }
       }
 
@@ -177,8 +177,8 @@ export class TwitterAdapter implements PlatformAdapter {
         if (ytdlpResult.success && ytdlpResult.data) {
           return ytdlpResult;
         }
-      } catch (ytdlpErr) {
-        console.warn('Twitter yt-dlp notice:', ytdlpErr);
+      } catch {
+        // Continue to VxTwitter fallback
       }
 
       // Method C: Public VxTwitter API Fallback
@@ -260,8 +260,8 @@ export class TwitterAdapter implements PlatformAdapter {
               return { success: true, data: metadata };
             }
           }
-        } catch (vxErr) {
-          console.warn('VxTwitter API notice:', vxErr);
+        } catch {
+          // VxTwitter fallback unavailable
         }
       }
 

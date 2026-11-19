@@ -8,7 +8,7 @@ export class TempFileManager {
   private maxAgeMs: number = 30 * 60 * 1000; // 30 minutes
 
   constructor() {
-    this.tempDir = path.join(os.tmpdir(), 'nectora_media_cache');
+    this.tempDir = path.join(os.tmpdir(), 'wukong_vid_cache');
     try {
       if (!fs.existsSync(this.tempDir)) {
         fs.mkdirSync(this.tempDir, { recursive: true, mode: 0o700 });

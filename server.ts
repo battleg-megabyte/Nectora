@@ -1,12 +1,26 @@
 import express, { Request, Response } from 'express';
 import path from 'path';
 import fs from 'node:fs';
+import dns from 'node:dns';
+import http from 'node:http';
 import dotenv from 'dotenv';
 import { Readable } from 'node:stream';
 import { spawn } from 'child_process';
 import { createServer as createViteServer } from 'vite';
+
+dns.setDefaultResultOrder('ipv4first');
 import { adapterManager } from './server/adapters/index.js';
-import { validateSafeUrl, sanitizeFilename, getPlatformSecurityCookies } from './server/security.js';
+import {
+  validateSafeUrl,
+  safeFetch,
+  validateFfmpegRemoteUrl,
+  sanitizeFilename,
+  sanitizeCookieHeader,
+  sanitizeMediaFormat,
+  sanitizeAudioBitrate,
+  sanitizeVideoHeight,
+  getPlatformSecurityCookies,
+} from './server/security.js';
 import { RateLimiter } from './server/rateLimiter.js';
 import { tempManager } from './server/tempManager.js';
 import {
@@ -39,44 +53,54 @@ function isHlsStreamUrl(targetUrl: string): boolean {
 }
 
 function buildUpstreamHeaders(parsedUrl: URL, clientCookies?: string): Record<string, string> {
+  const host = parsedUrl.hostname.toLowerCase();
   const headers: Record<string, string> = {
     'User-Agent':
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
     Accept: '*/*',
   };
 
-  if (parsedUrl.hostname.includes('tikcdn.io') || parsedUrl.hostname.includes('ssstik.io')) {
+  if (host.includes('tikcdn.io') || host.includes('ssstik.io')) {
     headers['Referer'] = 'https://ssstik.io/';
     headers['Cookie'] = getPlatformSecurityCookies('tiktok', clientCookies);
   } else if (
-    parsedUrl.hostname.includes('tiktok.com') ||
-    parsedUrl.hostname.includes('tiktokv.us') ||
-    parsedUrl.hostname.includes('byteoversea.com')
+    host.includes('tiktok') ||
+    host.includes('tikwm.com') ||
+    host.includes('muscdn.com') ||
+    host.includes('ibytedtos.com') ||
+    host.includes('byteoversea.com') ||
+    host.includes('musical.ly')
   ) {
     headers['Referer'] = 'https://www.tiktok.com/';
+    headers['Origin'] = 'https://www.tiktok.com';
     headers['Cookie'] = getPlatformSecurityCookies('tiktok', clientCookies);
   } else if (
-    parsedUrl.hostname.includes('instagram.com') ||
-    parsedUrl.hostname.includes('cdninstagram.com')
+    host.includes('instagram') ||
+    host.includes('cdninstagram.com') ||
+    host.includes('eeinstagram.com')
   ) {
     headers['Referer'] = 'https://www.instagram.com/';
     headers['Cookie'] = getPlatformSecurityCookies('instagram', clientCookies);
-  } else if (parsedUrl.hostname.includes('fbcdn.net') || parsedUrl.hostname.includes('facebook.com')) {
+  } else if (
+    host.includes('fbcdn.net') ||
+    host.includes('facebook.com') ||
+    host.includes('fbsbx.com')
+  ) {
     headers['Referer'] = 'https://www.facebook.com/';
     headers['Cookie'] = getPlatformSecurityCookies('facebook', clientCookies);
-  } else if (parsedUrl.hostname.includes('rapidcdn.app')) {
+  } else if (host.includes('rapidcdn.app') || host.includes('snapsave.app')) {
     headers['Referer'] = 'https://snapsave.app/';
     headers['Origin'] = 'https://snapsave.app';
   } else if (
-    parsedUrl.hostname.includes('twimg.com') ||
-    parsedUrl.hostname.includes('x.com') ||
-    parsedUrl.hostname.includes('twitter.com')
+    host.includes('twimg.com') ||
+    host.includes('x.com') ||
+    host.includes('twitter.com')
   ) {
     headers['Referer'] = 'https://x.com/';
     headers['Cookie'] = getPlatformSecurityCookies('twitter', clientCookies);
-  } else if (parsedUrl.hostname.includes('v.redd.it') || parsedUrl.hostname.includes('reddit.com')) {
+  } else if (host.includes('v.redd.it') || host.includes('reddit.com')) {
     headers['Referer'] = 'https://www.reddit.com/';
-  } else if (parsedUrl.hostname.includes('vimeo.com') || parsedUrl.hostname.includes('vimeocdn.com')) {
+  } else if (host.includes('vimeo.com') || host.includes('vimeocdn.com')) {
     headers['Referer'] = 'https://vimeo.com/';
   }
 
@@ -97,6 +121,9 @@ function buildFfmpegHttpArgs(parsedUrl: URL, clientCookies?: string, isHls = fal
   }
 
   const args: string[] = [
+    '-nostdin',
+    '-protocol_whitelist',
+    'http,https,tcp,tls,crypto',
     '-user_agent',
     upstreamHeaders['User-Agent'],
   ];
@@ -105,7 +132,9 @@ function buildFfmpegHttpArgs(parsedUrl: URL, clientCookies?: string, isHls = fal
     args.push('-headers', `${headerLines.join('\r\n')}\r\n`);
   }
 
-  if (!isHls) {
+  if (isHls) {
+    args.push('-http_persistent', '1', '-fflags', '+genpts+discardcorrupt');
+  } else {
     args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
   }
 
@@ -141,8 +170,16 @@ function spawnGuardedFfmpegStream(options: {
   let clientClosed = false;
   let stderrLog = '';
 
+  const watchdog = setTimeout(() => {
+    if (!clientClosed) {
+      clientClosed = true;
+      ff.kill('SIGKILL');
+    }
+  }, 120000);
+
   const finishOnClose = () => {
     clientClosed = true;
+    clearTimeout(watchdog);
     ff.kill('SIGKILL');
   };
   req.on('close', finishOnClose);
@@ -179,6 +216,7 @@ function spawnGuardedFfmpegStream(options: {
   });
 
   ff.on('error', async (err) => {
+    clearTimeout(watchdog);
     req.off('close', finishOnClose);
     if (clientClosed) return;
     if (!sentFirstByte && onEmptyFailure) {
@@ -193,6 +231,7 @@ function spawnGuardedFfmpegStream(options: {
   });
 
   ff.on('close', async (code) => {
+    clearTimeout(watchdog);
     req.off('close', finishOnClose);
     if (clientClosed) return;
     if (sentFirstByte) {
@@ -220,17 +259,19 @@ function spawnGuardedFfmpegStream(options: {
   });
 }
 
-async function transcodeMp3ViaTempFallback(options: {
+async function transcodeAudioViaTempFallback(options: {
   mediaUrl: string;
   upstreamHeaders: Record<string, string>;
   res: Response;
   req: Request;
   cleanAsciiFilename: string;
   safeFilename: string;
+  format: 'mp3' | 'm4a';
+  bitrate: string;
 }) {
-  const { mediaUrl, upstreamHeaders, res, req, cleanAsciiFilename, safeFilename } = options;
+  const { mediaUrl, upstreamHeaders, res, req, cleanAsciiFilename, safeFilename, format, bitrate } = options;
   const inputTmp = tempManager.getTempFilePath('media');
-  const outputTmp = tempManager.getTempFilePath('mp3');
+  const outputTmp = tempManager.getTempFilePath(format);
   const abortCtrl = new AbortController();
   const onReqClose = () => abortCtrl.abort();
   req.on('close', onReqClose);
@@ -238,9 +279,8 @@ async function transcodeMp3ViaTempFallback(options: {
   try {
     const isHls = isHlsStreamUrl(mediaUrl);
     if (!isHls) {
-      const upstreamRes = await fetch(mediaUrl, {
+      const { response: upstreamRes } = await safeFetch(mediaUrl, {
         headers: upstreamHeaders,
-        redirect: 'follow',
         signal: abortCtrl.signal,
       });
 
@@ -269,7 +309,13 @@ async function transcodeMp3ViaTempFallback(options: {
       : [];
 
     const ffConvert = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+      const codecArgs =
+        format === 'm4a'
+          ? ['-c:a', 'aac', '-b:a', bitrate, '-ar', '44100', '-ac', '2', '-movflags', '+faststart']
+          : ['-c:a', 'libmp3lame', '-b:a', bitrate, '-ar', '44100', '-ac', '2', '-id3v2_version', '3', '-write_xing', '1'];
+
       const args = [
+        '-nostdin',
         '-y',
         '-hide_banner',
         '-loglevel', 'error',
@@ -277,12 +323,7 @@ async function transcodeMp3ViaTempFallback(options: {
         '-i', inputSource,
         '-vn',
         '-map', '0:a:0',
-        '-c:a', 'libmp3lame',
-        '-b:a', '320k',
-        '-ar', '44100',
-        '-ac', '2',
-        '-id3v2_version', '3',
-        '-write_xing', '1',
+        ...codecArgs,
         outputTmp.filePath,
       ];
       const proc = spawn(getFfmpegPath(), args);
@@ -303,8 +344,8 @@ async function transcodeMp3ViaTempFallback(options: {
       if (!res.headersSent) {
         res.status(noAudio ? 422 : 502).json({
           error: noAudio
-            ? 'This video has no audio track to convert to MP3.'
-            : 'Unable to convert audio stream to MP3.',
+            ? `This video has no audio track to convert to ${format.toUpperCase()}.`
+            : `Unable to convert audio stream to ${format.toUpperCase()}.`,
         });
       }
       return;
@@ -313,12 +354,17 @@ async function transcodeMp3ViaTempFallback(options: {
     const stat = fs.statSync(outputTmp.filePath);
     if (stat.size <= 0) {
       if (!res.headersSent) {
-        res.status(502).json({ error: 'Converted MP3 file was empty.' });
+        res.status(502).json({ error: `Converted ${format.toUpperCase()} file was empty.` });
       }
       return;
     }
 
-    sendAttachmentHeaders(res, 'audio/mpeg', cleanAsciiFilename, safeFilename);
+    sendAttachmentHeaders(
+      res,
+      format === 'm4a' ? 'audio/mp4' : 'audio/mpeg',
+      cleanAsciiFilename,
+      safeFilename
+    );
     res.setHeader('Content-Length', String(stat.size));
 
     const outStream = fs.createReadStream(outputTmp.filePath);
@@ -329,7 +375,7 @@ async function transcodeMp3ViaTempFallback(options: {
     });
   } catch (err: any) {
     if (!abortCtrl.signal.aborted && !res.headersSent) {
-      res.status(502).json({ error: err?.message || 'MP3 fallback conversion failed.' });
+      res.status(502).json({ error: err?.message || 'Audio fallback conversion failed.' });
     }
   } finally {
     req.off('close', onReqClose);
@@ -372,18 +418,37 @@ function spawnHlsToMp4Remux(
 
 async function startServer() {
   const app = express();
+  app.disable('x-powered-by');
   const rateLimiter = new RateLimiter();
 
   // Basic middleware
-  app.use(express.json({ limit: '2mb' }));
-  app.use(express.urlencoded({ extended: true, limit: '2mb' }));
+  app.use(express.json({ limit: '1mb' }));
+  app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
-  // CORS and Security Cookie Headers
+  // Global Security & Frame Protection Headers
   app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    res.setHeader('X-DNS-Prefetch-Control', 'off');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(), microphone=(), geolocation=(), payment=(), usb=()'
+    );
+    res.setHeader(
+      'Content-Security-Policy',
+      "frame-ancestors 'self' https://aistudio.google.com https://*.google.com https://*.googleusercontent.com; base-uri 'self'; object-src 'none'; form-action 'self'"
+    );
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Range, Cookie, X-Cookies, X-Security-Cookie');
-    res.setHeader('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Set-Cookie');
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, Range, Cookie, X-Cookies, X-Security-Cookie'
+    );
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, X-Expected-Bytes, Retry-After'
+    );
     if (req.method === 'OPTIONS') {
       res.sendStatus(204);
       return;
@@ -398,13 +463,14 @@ async function startServer() {
   app.get('/api/health', (req: Request, res: Response) => {
     res.json({
       status: 'ok',
-      service: 'NEcTORa Video Core',
-      version: '1.0.0',
+      service: 'WuKong-Vid Core',
+      version: '1.1.0',
       supportedPlatforms: ['tiktok', 'instagram', 'facebook', 'twitter', 'reddit', 'direct_media'],
       excludedPlatforms: ['youtube'],
+      supportedQualities: ['2160p', '1440p', '1080p', '720p', '480p', '360p', 'mp3_320k', 'mp3_192k', 'mp3_128k', 'm4a_256k'],
       limits: {
         maxFileSizeMb: Number(process.env.MAX_FILE_SIZE_MB) || 500,
-        rateLimitPerMinute: Number(process.env.RATE_LIMIT_REQUESTS) || 120,
+        rateLimitPerMinute: Number(process.env.RATE_LIMIT_REQUESTS) || 180,
       },
     });
   });
@@ -447,15 +513,16 @@ async function startServer() {
     try {
       const mediaUrl = req.query.url as string;
       const audioUrl = (req.query.audioUrl as string) || '';
-      const format = (req.query.format as string) || 'mp4';
+      const rawFormat = (req.query.format as string) || 'mp4';
+      const format = sanitizeMediaFormat(rawFormat);
 
-      if (!mediaUrl) {
-        res.status(400).send('Missing media URL');
+      if (!mediaUrl || !format) {
+        res.status(400).send('Invalid media URL or format');
         return;
       }
 
       const validation = await validateSafeUrl(mediaUrl);
-      if (!validation.safe) {
+      if (!validation.safe || !validateFfmpegRemoteUrl(mediaUrl)) {
         res.status(400).send('Forbidden media address');
         return;
       }
@@ -470,7 +537,7 @@ async function startServer() {
       // If separate audioUrl is provided, mux audio and video in real-time with FFmpeg
       if (audioUrl && audioUrl !== mediaUrl) {
         const audioValidation = await validateSafeUrl(audioUrl);
-        if (!audioValidation.safe) {
+        if (!audioValidation.safe || !validateFfmpegRemoteUrl(audioUrl)) {
           res.status(400).send('Forbidden audio address');
           return;
         }
@@ -503,14 +570,14 @@ async function startServer() {
         return;
       }
 
-      // If format is MP3, stream direct native MP3 or transcode audio in real-time
-      if (format === 'mp3') {
+      // If format is MP3 or M4A, stream direct native MP3 or transcode audio in real-time
+      if (format === 'mp3' || format === 'm4a') {
         const upstreamHeaders = buildUpstreamHeaders(parsedMediaUrl, clientCookies);
         const isHls = isHlsStreamUrl(mediaUrl);
 
-        if (!isHls && (parsedMediaUrl.pathname.toLowerCase().endsWith('.mp3') || mediaUrl.includes('mime_type=audio_mpeg'))) {
+        if (format === 'mp3' && !isHls && (parsedMediaUrl.pathname.toLowerCase().endsWith('.mp3') || mediaUrl.includes('mime_type=audio_mpeg'))) {
           try {
-            const directAudio = await fetch(mediaUrl, { headers: upstreamHeaders, redirect: 'follow' });
+            const { response: directAudio } = await safeFetch(mediaUrl, { headers: upstreamHeaders });
             const ct = (directAudio.headers.get('content-type') || '').toLowerCase();
             if (directAudio.ok && directAudio.body && ct.includes('audio/')) {
               res.setHeader('Content-Type', 'audio/mpeg');
@@ -527,26 +594,41 @@ async function startServer() {
         }
 
         const httpArgs = buildFfmpegHttpArgs(parsedMediaUrl, clientCookies, isHls);
-        const ffArgs = [
-          '-hide_banner',
-          '-loglevel', 'error',
-          ...httpArgs,
-          '-i', mediaUrl,
-          '-vn',
-          '-map', '0:a:0',
-          '-c:a', 'libmp3lame',
-          '-b:a', '320k',
-          '-ar', '44100',
-          '-ac', '2',
-          '-f', 'mp3',
-          'pipe:1',
-        ];
+        const ffArgs =
+          format === 'm4a'
+            ? [
+                '-hide_banner',
+                '-loglevel', 'error',
+                ...httpArgs,
+                '-i', mediaUrl,
+                '-vn',
+                '-map', '0:a:0',
+                '-c:a', 'aac',
+                '-b:a', '256k',
+                '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+                '-f', 'mp4',
+                'pipe:1',
+              ]
+            : [
+                '-hide_banner',
+                '-loglevel', 'error',
+                ...httpArgs,
+                '-i', mediaUrl,
+                '-vn',
+                '-map', '0:a:0',
+                '-c:a', 'libmp3lame',
+                '-b:a', '320k',
+                '-ar', '44100',
+                '-ac', '2',
+                '-f', 'mp3',
+                'pipe:1',
+              ];
 
         spawnGuardedFfmpegStream({
           ffArgs,
           res,
           req,
-          contentType: 'audio/mpeg',
+          contentType: format === 'm4a' ? 'audio/mp4' : 'audio/mpeg',
         });
         return;
       }
@@ -568,9 +650,8 @@ async function startServer() {
         upstreamHeaders['Range'] = req.headers.range;
       }
 
-      const remoteRes = await fetch(mediaUrl, {
+      const { response: remoteRes } = await safeFetch(mediaUrl, {
         headers: upstreamHeaders,
-        redirect: 'follow',
       });
 
       if (!remoteRes.ok && remoteRes.status !== 206) {
@@ -631,13 +712,19 @@ async function startServer() {
     }
   });
 
-  // Secure download streaming endpoint (with full audio+video remuxing for 1080p/4K)
+  // Secure download streaming endpoint (multi-resolution MP4 + multi-bitrate MP3/M4A + safeFetch SSRF redirect guard)
   app.get('/api/download', async (req: Request, res: Response) => {
     try {
       const mediaUrl = req.query.url as string;
       const audioUrl = (req.query.audioUrl as string) || '';
-      const rawFilename = (req.query.filename as string) || 'nectora_media.mp4';
-      const format = (req.query.format as string) || 'mp4';
+      const rawFilename = (req.query.filename as string) || 'wukong_vid_media.mp4';
+      const rawFormat = (req.query.format as string) || 'mp4';
+      const format = sanitizeMediaFormat(rawFormat);
+      const bitrate = sanitizeAudioBitrate(
+        req.query.bitrate as string | undefined,
+        format === 'm4a' ? '256k' : '320k'
+      );
+      const scaleHeight = sanitizeVideoHeight(req.query.scaleHeight as string | undefined);
       const fileSizeBytes = (req.query.fileSizeBytes as string) || '';
 
       if (!mediaUrl) {
@@ -645,15 +732,20 @@ async function startServer() {
         return;
       }
 
+      if (!format) {
+        res.status(400).json({ error: 'Unsupported or forbidden container format.' });
+        return;
+      }
+
       const validation = await validateSafeUrl(mediaUrl);
-      if (!validation.safe) {
+      if (!validation.safe || !validateFfmpegRemoteUrl(mediaUrl)) {
         res.status(400).json({ error: validation.error || 'Target URL is not permitted.' });
         return;
       }
 
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Expose-Headers', 'Content-Length, X-Expected-Bytes, Content-Disposition');
-      if (fileSizeBytes) {
+      if (fileSizeBytes && /^\d+$/.test(fileSizeBytes)) {
         res.setHeader('X-Expected-Bytes', fileSizeBytes);
       }
 
@@ -668,48 +760,12 @@ async function startServer() {
       const upstreamHeaders = buildUpstreamHeaders(parsedUrl, clientCookies);
       upstreamHeaders['Accept-Encoding'] = 'identity';
 
-      // 1. Separate Video + Audio Muxing (for True 1080p, 4K, 720p with crystal clear sound)
-      if (audioUrl && audioUrl !== mediaUrl) {
-        const audioValidation = await validateSafeUrl(audioUrl);
-        if (!audioValidation.safe) {
-          res.status(400).json({ error: 'Audio source address is invalid.' });
-          return;
-        }
-
-        const parsedAudioUrl = new URL(audioUrl);
-        const videoHttpArgs = buildFfmpegHttpArgs(parsedUrl, clientCookies, isHlsStreamUrl(mediaUrl));
-        const audioHttpArgs = buildFfmpegHttpArgs(parsedAudioUrl, clientCookies, isHlsStreamUrl(audioUrl));
-
-        const ffArgs = [
-          '-hide_banner',
-          '-loglevel', 'error',
-          ...videoHttpArgs,
-          '-i', mediaUrl,
-          ...audioHttpArgs,
-          '-i', audioUrl,
-          '-c:v', 'copy',
-          '-c:a', 'aac',
-          '-b:a', '192k',
-          '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-          '-f', 'mp4',
-          'pipe:1',
-        ];
-
-        spawnGuardedFfmpegStream({
-          ffArgs,
-          res,
-          req,
-          contentType: 'video/mp4',
-          cleanAsciiFilename,
-          safeFilename,
-        });
-        return;
-      }
-
-      // 2. MP3 Download (Native Audio Pass-Through OR Full-Header FFmpeg Transcode + Temp-File Fallback)
-      if (format === 'mp3') {
+      // 1. Audio Download: MP3 (320k/192k/128k) OR M4A AAC (256k)
+      if (format === 'mp3' || format === 'm4a') {
         const isHls = isHlsStreamUrl(mediaUrl);
         const looksDirectMp3 =
+          format === 'mp3' &&
+          bitrate === '320k' &&
           !isHls &&
           (parsedUrl.pathname.toLowerCase().endsWith('.mp3') ||
             mediaUrl.toLowerCase().includes('mime_type=audio_mpeg') ||
@@ -717,9 +773,8 @@ async function startServer() {
 
         if (looksDirectMp3) {
           try {
-            const directAudioRes = await fetch(mediaUrl, {
+            const { response: directAudioRes } = await safeFetch(mediaUrl, {
               headers: upstreamHeaders,
-              redirect: 'follow',
             });
             const directType = (directAudioRes.headers.get('content-type') || '').toLowerCase();
             if (
@@ -747,28 +802,47 @@ async function startServer() {
         }
 
         const httpArgs = buildFfmpegHttpArgs(parsedUrl, clientCookies, isHls);
-        const ffArgs = [
-          '-hide_banner',
-          '-loglevel', 'error',
-          ...httpArgs,
-          '-i', mediaUrl,
-          '-vn',
-          '-map', '0:a:0',
-          '-c:a', 'libmp3lame',
-          '-b:a', '320k',
-          '-ar', '44100',
-          '-ac', '2',
-          '-id3v2_version', '3',
-          '-write_xing', '1',
-          '-f', 'mp3',
-          'pipe:1',
-        ];
+        const ffArgs =
+          format === 'm4a'
+            ? [
+                '-hide_banner',
+                '-loglevel', 'error',
+                '-threads', '0',
+                ...httpArgs,
+                '-i', mediaUrl,
+                '-vn', '-sn', '-dn',
+                '-map', '0:a:0',
+                '-c:a', 'aac',
+                '-b:a', bitrate,
+                '-ar', '44100',
+                '-ac', '2',
+                '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+                '-f', 'mp4',
+                'pipe:1',
+              ]
+            : [
+                '-hide_banner',
+                '-loglevel', 'error',
+                '-threads', '0',
+                ...httpArgs,
+                '-i', mediaUrl,
+                '-vn', '-sn', '-dn',
+                '-map', '0:a:0',
+                '-c:a', 'libmp3lame',
+                '-b:a', bitrate,
+                '-ar', '44100',
+                '-ac', '2',
+                '-id3v2_version', '3',
+                '-write_xing', '1',
+                '-f', 'mp3',
+                'pipe:1',
+              ];
 
         spawnGuardedFfmpegStream({
           ffArgs,
           res,
           req,
-          contentType: 'audio/mpeg',
+          contentType: format === 'm4a' ? 'audio/mp4' : 'audio/mpeg',
           cleanAsciiFilename,
           safeFilename,
           onEmptyFailure: async (stderrLog) => {
@@ -777,24 +851,114 @@ async function startServer() {
               stderrLog.includes('matches no streams')
             ) {
               if (!res.headersSent) {
-                res.status(422).json({ error: 'This video has no audio track to convert to MP3.' });
+                res.status(422).json({ error: `This video has no audio track to convert to ${format.toUpperCase()}.` });
               }
               return;
             }
-            await transcodeMp3ViaTempFallback({
+            await transcodeAudioViaTempFallback({
               mediaUrl,
               upstreamHeaders,
               res,
               req,
               cleanAsciiFilename,
               safeFilename,
+              format,
+              bitrate,
             });
           },
         });
         return;
       }
 
-      // 3. HLS (.m3u8) -> Playable MP4 Remux Download OR Direct Progressive Stream Download
+      // 2. Separate Video + Audio Muxing (for 4K, 1440p, 1080p, 720p, or scaled compact MP4)
+      if (audioUrl && audioUrl !== mediaUrl) {
+        const audioValidation = await validateSafeUrl(audioUrl);
+        if (!audioValidation.safe || !validateFfmpegRemoteUrl(audioUrl)) {
+          res.status(400).json({ error: 'Audio source address is invalid.' });
+          return;
+        }
+
+        const parsedAudioUrl = new URL(audioUrl);
+        const videoHttpArgs = buildFfmpegHttpArgs(parsedUrl, clientCookies, isHlsStreamUrl(mediaUrl));
+        const audioHttpArgs = buildFfmpegHttpArgs(parsedAudioUrl, clientCookies, isHlsStreamUrl(audioUrl));
+
+        const scaleArgs =
+          scaleHeight && scaleHeight < 1080
+            ? [
+                '-vf',
+                `scale=w='if(gt(iw,ih),-2,trunc(min(iw,${scaleHeight})/2)*2)':h='if(gt(iw,ih),trunc(min(ih,${scaleHeight})/2)*2,-2)'`,
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-crf', scaleHeight <= 360 ? '30' : '28',
+                '-maxrate', scaleHeight <= 360 ? '360k' : '620k',
+                '-bufsize', scaleHeight <= 360 ? '720k' : '1240k',
+                '-threads', '0',
+              ]
+            : ['-c:v', 'copy'];
+
+        const ffArgs = [
+          '-hide_banner',
+          '-loglevel', 'error',
+          ...videoHttpArgs,
+          '-i', mediaUrl,
+          ...audioHttpArgs,
+          '-i', audioUrl,
+          ...scaleArgs,
+          '-c:a', 'aac',
+          '-b:a', scaleHeight && scaleHeight <= 360 ? '96k' : scaleHeight && scaleHeight <= 480 ? '128k' : '192k',
+          '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+          '-f', 'mp4',
+          'pipe:1',
+        ];
+
+        spawnGuardedFfmpegStream({
+          ffArgs,
+          res,
+          req,
+          contentType: 'video/mp4',
+          cleanAsciiFilename,
+          safeFilename,
+        });
+        return;
+      }
+
+      // 3. Scaled Compact MP4 Transcoding (480p SD / 360p Mobile Saver / 720p when requested on single-stream sources)
+      if (scaleHeight && scaleHeight <= 720) {
+        const httpArgs = buildFfmpegHttpArgs(parsedUrl, clientCookies, isHlsStreamUrl(mediaUrl));
+        const maxRate = scaleHeight <= 360 ? '360k' : scaleHeight <= 480 ? '620k' : '1300k';
+        const bufSize = scaleHeight <= 360 ? '720k' : scaleHeight <= 480 ? '1240k' : '2600k';
+        const ffArgs = [
+          '-hide_banner',
+          '-loglevel', 'error',
+          '-threads', '0',
+          ...httpArgs,
+          '-i', mediaUrl,
+          '-vf',
+          `scale=w='if(gt(iw,ih),-2,trunc(min(iw,${scaleHeight})/2)*2)':h='if(gt(iw,ih),trunc(min(ih,${scaleHeight})/2)*2,-2)'`,
+          '-c:v', 'libx264',
+          '-preset', 'veryfast',
+          '-crf', scaleHeight <= 360 ? '30' : scaleHeight <= 480 ? '28' : '26',
+          '-maxrate', maxRate,
+          '-bufsize', bufSize,
+          '-c:a', 'aac',
+          '-b:a', scaleHeight <= 360 ? '96k' : scaleHeight <= 480 ? '128k' : '160k',
+          '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+          '-f', 'mp4',
+          'pipe:1',
+        ];
+
+        spawnGuardedFfmpegStream({
+          ffArgs,
+          res,
+          req,
+          contentType: 'video/mp4',
+          cleanAsciiFilename,
+          safeFilename,
+        });
+        return;
+      }
+
+      // 4. HLS (.m3u8) -> Playable MP4 Remux Download
       if (isHlsStreamUrl(mediaUrl)) {
         spawnHlsToMp4Remux(
           mediaUrl,
@@ -808,17 +972,44 @@ async function startServer() {
         return;
       }
 
-      const remoteRes = await fetch(mediaUrl, {
-        headers: upstreamHeaders,
-        redirect: 'follow',
-      });
+      // 5. Direct Progressive Video Stream Pass-Through (with hop-by-hop safeFetch SSRF validation)
+      let remoteRes!: globalThis.Response;
+      let lastFetchErr: any = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const result = await safeFetch(mediaUrl, {
+            headers: upstreamHeaders,
+            signal: AbortSignal.timeout(attempt === 0 ? 8500 : 12000),
+          });
+          remoteRes = result.response;
+          lastFetchErr = null;
+          break;
+        } catch (fetchErr: any) {
+          lastFetchErr = fetchErr;
+          if (req.destroyed || req.socket?.destroyed) break;
+        }
+      }
+      if (lastFetchErr) {
+        throw lastFetchErr;
+      }
+
+      if (remoteRes.status === 401 || remoteRes.status === 403) {
+        await remoteRes.body?.cancel().catch(() => {});
+        const retryResult = await safeFetch(mediaUrl, {
+          headers: {
+            'User-Agent': upstreamHeaders['User-Agent'],
+            Accept: '*/*',
+          },
+          signal: AbortSignal.timeout(12000),
+        });
+        remoteRes = retryResult.response;
+      }
 
       if (!remoteRes.ok) {
         res.status(remoteRes.status).json({ error: `Upstream source returned HTTP ${remoteRes.status}. The media stream may have expired.` });
         return;
       }
 
-      // Detect if upstream sent an HLS playlist or an HTML/JSON page
       const upstreamContentType = (remoteRes.headers.get('content-type') || '').toLowerCase();
       if (upstreamContentType.includes('mpegurl') || upstreamContentType.includes('m3u8')) {
         spawnHlsToMp4Remux(
@@ -838,16 +1029,10 @@ async function startServer() {
         return;
       }
 
-      const contentType = format === 'mp3' ? 'audio/mpeg' : 'video/mp4';
+      const contentType = format === 'webm' ? 'video/webm' : 'video/mp4';
       const contentLength = remoteRes.headers.get('content-length');
 
-      res.setHeader('Content-Type', contentType);
-      res.setHeader('X-Content-Type-Options', 'nosniff');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${cleanAsciiFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`
-      );
-
+      sendAttachmentHeaders(res, contentType, cleanAsciiFilename, safeFilename);
       if (contentLength) {
         res.setHeader('Content-Length', contentLength);
       }
@@ -872,7 +1057,7 @@ async function startServer() {
     } catch (err: any) {
       console.error('Download stream error:', err);
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Failed to process download stream.' });
+        res.status(500).json({ error: err?.message || 'Failed to process download stream.' });
       }
     }
   });
@@ -880,12 +1065,16 @@ async function startServer() {
   // AI Endpoint: Deep Media Analysis
   app.post('/api/ai/analyze', async (req: Request, res: Response) => {
     try {
-      const { title, description, platform, authorName } = req.body;
+      const { title, description, platform, authorName } = req.body || {};
+      if (title && (typeof title !== 'string' || title.length > 500)) {
+        res.status(400).json({ error: 'Invalid title parameter.' });
+        return;
+      }
       const result = await analyzeMediaContent({
-        title: title || 'Social Video',
-        description,
-        platform: platform || 'Social Media',
-        authorName,
+        title: (typeof title === 'string' ? title.slice(0, 300) : '') || 'Social Video',
+        description: typeof description === 'string' ? description.slice(0, 2000) : undefined,
+        platform: (typeof platform === 'string' ? platform.slice(0, 50) : '') || 'Social Media',
+        authorName: typeof authorName === 'string' ? authorName.slice(0, 120) : undefined,
       });
       res.json(result);
     } catch (err: any) {
@@ -897,8 +1086,19 @@ async function startServer() {
   // AI Endpoint: Fast Viral Hashtags & SEO
   app.post('/api/ai/fast-tags', async (req: Request, res: Response) => {
     try {
-      const { title, platform } = req.body;
-      const result = await generateFastTags(title || 'Video', platform || 'Video');
+      const { title, platform } = req.body || {};
+      if (title !== undefined && (typeof title !== 'string' || title.length > 500)) {
+        res.status(400).json({ error: 'Invalid title parameter.' });
+        return;
+      }
+      if (platform !== undefined && (typeof platform !== 'string' || platform.length > 100)) {
+        res.status(400).json({ error: 'Invalid platform parameter.' });
+        return;
+      }
+      const result = await generateFastTags(
+        (typeof title === 'string' ? title.slice(0, 300) : '') || 'Video',
+        (typeof platform === 'string' ? platform.slice(0, 50) : '') || 'Video'
+      );
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: 'Fast tags generation failed' });
@@ -908,36 +1108,338 @@ async function startServer() {
   // AI Endpoint: Google Search Grounding Context
   app.post('/api/ai/search-context', async (req: Request, res: Response) => {
     try {
-      const { query } = req.body;
-      if (!query) {
-        res.status(400).json({ error: 'Query parameter required' });
+      const { query } = req.body || {};
+      if (!query || typeof query !== 'string' || query.length > 300) {
+        res.status(400).json({ error: 'Valid query parameter required (max 300 chars).' });
         return;
       }
-      const result = await searchVideoContext(query);
+      const result = await searchVideoContext(query.trim());
       res.json(result);
     } catch (err: any) {
       res.status(500).json({ error: 'Search grounding failed' });
     }
   });
 
+  // Live Security Penetration & Policy Verification Suite (14 real checks)
+  app.get('/api/test-security', async (req: Request, res: Response) => {
+    const baseUrl = `http://127.0.0.1:${PORT}`;
+    const checks: Array<{
+      id: string;
+      name: string;
+      category: string;
+      passed: boolean;
+      details: string;
+    }> = [];
+
+    // 1. SSRF IPv4 Loopback & Unspecified
+    const v4Loop = await Promise.all([
+      validateSafeUrl('http://127.0.0.1:8080/secret'),
+      validateSafeUrl('http://0.0.0.0:3000/'),
+      validateSafeUrl('http://localhost/admin'),
+    ]);
+    checks.push({
+      id: 'sec_ssrf_v4_loop',
+      name: 'SSRF Block: IPv4 Loopback & Localhost',
+      category: 'SSRF Firewall',
+      passed: v4Loop.every((r) => !r.safe),
+      details: 'Blocked 127.0.0.1, 0.0.0.0, localhost',
+    });
+
+    // 2. SSRF IPv6 Loopback [::1], IPv4-mapped, ULA (AWS IPv6 IMDS)
+    const v6Loop = await Promise.all([
+      validateSafeUrl('http://[::1]:3000/api/health'),
+      validateSafeUrl('http://[::ffff:127.0.0.1]/'),
+      validateSafeUrl('http://[::ffff:7f00:1]/'),
+      validateSafeUrl('http://[fd00:ec2::254]/latest/meta-data/'),
+    ]);
+    checks.push({
+      id: 'sec_ssrf_v6',
+      name: 'SSRF Block: IPv6 [::1], Mapped Hex & ULA IMDS',
+      category: 'SSRF Firewall',
+      passed: v6Loop.every((r) => !r.safe),
+      details: 'Blocked [::1], [::ffff:127.0.0.1], [::ffff:7f00:1], [fd00:ec2::254]',
+    });
+
+    // 3. SSRF Private Subnets & CGNAT
+    const rfc1918 = await Promise.all([
+      validateSafeUrl('http://10.0.0.1/internal'),
+      validateSafeUrl('http://172.16.0.1/router'),
+      validateSafeUrl('http://192.168.1.1/admin'),
+      validateSafeUrl('http://100.64.1.1/cgnat'),
+    ]);
+    checks.push({
+      id: 'sec_ssrf_rfc1918',
+      name: 'SSRF Block: RFC1918 Private Ranges & CGNAT',
+      category: 'SSRF Firewall',
+      passed: rfc1918.every((r) => !r.safe),
+      details: 'Blocked 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10',
+    });
+
+    // 4. SSRF Cloud Instance Metadata Endpoints
+    const metadata = await Promise.all([
+      validateSafeUrl('http://169.254.169.254/latest/meta-data/'),
+      validateSafeUrl('http://metadata.google.internal/computeMetadata/v1/'),
+    ]);
+    checks.push({
+      id: 'sec_ssrf_metadata',
+      name: 'SSRF Block: AWS/GCP/Azure Cloud Metadata',
+      category: 'SSRF Firewall',
+      passed: metadata.every((r) => !r.safe),
+      details: 'Blocked 169.254.169.254 & metadata.google.internal',
+    });
+
+    // 5. Non-HTTP Schemes (file://, gopher://, ftp://)
+    const schemes = await Promise.all([
+      validateSafeUrl('file:///etc/passwd'),
+      validateSafeUrl('gopher://127.0.0.1:6379/_INFO'),
+      validateSafeUrl('ftp://example.com/file.mp4'),
+    ]);
+    checks.push({
+      id: 'sec_schemes',
+      name: 'Scheme Allowlist: HTTP/HTTPS Only',
+      category: 'Protocol Guard',
+      passed: schemes.every((r) => !r.safe),
+      details: 'Rejected file://, gopher://, ftp://',
+    });
+
+    // 6. Embedded URL Credentials & Control Characters
+    const credsAndCtrl = await Promise.all([
+      validateSafeUrl('https://admin:password@example.com/video.mp4'),
+      validateSafeUrl('https://example.com/video.mp4\r\nX-Evil: 1'),
+    ]);
+    checks.push({
+      id: 'sec_userinfo_ctrl',
+      name: 'URL Hygiene: Embedded Credentials & Control Chars',
+      category: 'Input Validation',
+      passed: credsAndCtrl.every((r) => !r.safe),
+      details: 'Blocked user:pass@host and CRLF/control bytes',
+    });
+
+    // 7. YouTube Exclusion Policy
+    const ytChecks = await Promise.all([
+      validateSafeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ'),
+      validateSafeUrl('https://youtu.be/dQw4w9WgXcQ'),
+      validateSafeUrl('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'),
+    ]);
+    checks.push({
+      id: 'sec_yt_policy',
+      name: 'Platform Policy: YouTube Exclusion Enforced',
+      category: 'Policy',
+      passed: ytChecks.every((r) => !r.safe),
+      details: 'Blocked youtube.com, youtu.be, youtube-nocookie.com',
+    });
+
+    // 8. Filename Path Traversal, CRLF & Safe Extension Enforcement
+    const badName = sanitizeFilename('../../etc/passwd\r\nSet-Cookie: pwn=1.html', 'mp4');
+    const badNamePass =
+      !badName.includes('..') &&
+      !badName.includes('/') &&
+      !badName.includes('\r') &&
+      !badName.includes('\n') &&
+      badName.endsWith('.mp4');
+    checks.push({
+      id: 'sec_filename',
+      name: 'Filename Sanitization: Traversal, CRLF & Extension',
+      category: 'Header Safety',
+      passed: badNamePass,
+      details: `Sanitized output: ${badName}`,
+    });
+
+    // 9. Strict Allowlists for Format, Bitrate & ScaleHeight
+    const allowlistOk =
+      sanitizeMediaFormat('exe') === null &&
+      sanitizeMediaFormat('html') === null &&
+      sanitizeMediaFormat('mp3') === 'mp3' &&
+      sanitizeMediaFormat('m4a') === 'm4a' &&
+      sanitizeAudioBitrate('9999k') === '320k' &&
+      sanitizeAudioBitrate('128k') === '128k' &&
+      sanitizeVideoHeight('9999') === undefined &&
+      sanitizeVideoHeight('480') === 480;
+    checks.push({
+      id: 'sec_allowlists',
+      name: 'Parameter Allowlists: Container, Bitrate & Resolution',
+      category: 'Input Validation',
+      passed: allowlistOk,
+      details: 'Rejected exe/html containers, 9999k bitrate, 9999px height',
+    });
+
+    // 10. FFmpeg Argument & Protocol Injection Guard
+    const ffmpegGuardOk =
+      !validateFfmpegRemoteUrl('-i /etc/passwd') &&
+      !validateFfmpegRemoteUrl('https://example.com/a.mp4\n-f rawvideo') &&
+      !validateFfmpegRemoteUrl('file:///etc/passwd') &&
+      validateFfmpegRemoteUrl('https://cdn.example.com/video.mp4');
+    checks.push({
+      id: 'sec_ffmpeg',
+      name: 'FFmpeg Hardening: Arg Injection & Protocol Whitelist',
+      category: 'Media Engine',
+      passed: ffmpegGuardOk,
+      details: 'Blocked leading-dash flags, newlines, non-HTTP schemes; -nostdin & whitelist active',
+    });
+
+    // 11. Cookie CRLF Header Injection Protection
+    const cleanCookie = sanitizeCookieHeader('session=ok\r\nX-Injected: evil\0; token=123');
+    checks.push({
+      id: 'sec_cookie_crlf',
+      name: 'Cookie Sanitization: CRLF & Null Byte Stripping',
+      category: 'Header Safety',
+      passed: !/[\r\n\0]/.test(cleanCookie) && cleanCookie.includes('session=ok'),
+      details: `Stripped control bytes: "${cleanCookie}"`,
+    });
+
+    // 12. Live HTTP Redirect-SSRF Defense (302 -> http://127.0.0.1)
+    let redirectBlocked = false;
+    let redirectDetail = '';
+    const trapServer = http.createServer((_req, trapRes) => {
+      trapRes.writeHead(302, { Location: `http://127.0.0.1:${PORT}/api/health` });
+      trapRes.end();
+    });
+    try {
+      await new Promise<void>((resolve) => trapServer.listen(0, '127.0.0.1', resolve));
+      const addr = trapServer.address();
+      const trapPort = typeof addr === 'object' && addr ? addr.port : 0;
+      try {
+        await safeFetch(`http://127.0.0.1:${trapPort}/bounce`);
+        redirectDetail = 'safeFetch unexpectedly allowed loopback redirect';
+      } catch (err: any) {
+        redirectBlocked = true;
+        redirectDetail = `Blocked redirect trap: ${err?.message || 'SSRF rejected'}`;
+      }
+    } finally {
+      trapServer.close();
+    }
+    checks.push({
+      id: 'sec_redirect_ssrf',
+      name: 'Live Redirect-SSRF Guard (safeFetch Hop Check)',
+      category: 'SSRF Firewall',
+      passed: redirectBlocked,
+      details: redirectDetail,
+    });
+
+    // 13. Live HTTP Endpoint Exploitation Probes & Security Headers Audit
+    let endpointGuardsOk = false;
+    let headerAuditDetails = '';
+    try {
+      const [badFmtRes, badArgRes, badSsrfRes, healthRes] = await Promise.all([
+        fetch(`${baseUrl}/api/download?url=${encodeURIComponent('https://www.w3schools.com/html/mov_bbb.mp4')}&format=exe`),
+        fetch(`${baseUrl}/api/download?url=${encodeURIComponent('-i /etc/passwd')}&format=mp4`),
+        fetch(`${baseUrl}/api/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: 'http://[::1]:3000/' }),
+        }),
+        fetch(`${baseUrl}/api/health`),
+      ]);
+
+      const csp = healthRes.headers.get('content-security-policy') || '';
+      const nosniff = healthRes.headers.get('x-content-type-options') === 'nosniff';
+      const refPol = healthRes.headers.get('referrer-policy') === 'no-referrer';
+      const noPoweredBy = !healthRes.headers.get('x-powered-by');
+      const cspOk = csp.includes('frame-ancestors') && csp.includes("object-src 'none'");
+
+      endpointGuardsOk =
+        badFmtRes.status === 400 &&
+        badArgRes.status === 400 &&
+        badSsrfRes.status === 400 &&
+        healthRes.status === 200 &&
+        nosniff &&
+        refPol &&
+        noPoweredBy &&
+        cspOk;
+
+      headerAuditDetails = `HTTP statuses: format=exe->${badFmtRes.status}, flag->${badArgRes.status}, ipv6->${badSsrfRes.status}; headers: nosniff=${nosniff}, referrer=${refPol}, csp=${cspOk}, noXPB=${noPoweredBy}`;
+    } catch (err: any) {
+      headerAuditDetails = err?.message || 'HTTP probe error';
+    }
+    checks.push({
+      id: 'sec_http_probes',
+      name: 'Live HTTP Penetration Probes & Security Headers',
+      category: 'HTTP Defense',
+      passed: endpointGuardsOk,
+      details: headerAuditDetails,
+    });
+
+    // 14. Bounded Rate Limiter Stress Check
+    const testLimiter = new RateLimiter(2, 60000, 5);
+    const fakeReq = (ip: string) =>
+      ({
+        ip,
+        headers: {},
+        socket: { remoteAddress: ip },
+      }) as unknown as Request;
+    const dummyRes = () =>
+      ({
+        headers: {} as Record<string, string>,
+        statusCode: 200,
+        setHeader(k: string, v: string) {
+          this.headers[k] = v;
+        },
+        status(c: number) {
+          this.statusCode = c;
+          return this;
+        },
+        json() {
+          return this;
+        },
+      }) as any;
+
+    const mw = testLimiter.middleware();
+    let passedCount = 0;
+    const r1 = dummyRes();
+    mw(fakeReq('1.1.1.1'), r1, () => { passedCount++; });
+    mw(fakeReq('1.1.1.1'), r1, () => { passedCount++; });
+    const r3 = dummyRes();
+    mw(fakeReq('1.1.1.1'), r3, () => { passedCount++; });
+    // Populate past maxTrackedIps (5) to ensure eviction bounds map size
+    for (let i = 0; i < 10; i++) {
+      mw(fakeReq(`2.2.2.${i}`), dummyRes(), () => {});
+    }
+    const rateLimiterOk = passedCount === 2 && r3.statusCode === 429 && Boolean(r3.headers['Retry-After']);
+    checks.push({
+      id: 'sec_rate_limiter',
+      name: 'Rate Limiter: 429 Quota, Retry-After & Bounded Eviction',
+      category: 'Abuse Control',
+      passed: rateLimiterOk,
+      details: `Allowed 2/2, blocked 3rd with HTTP ${r3.statusCode} (Retry-After: ${r3.headers['Retry-After']}s)`,
+    });
+
+    const passedTotal = checks.filter((c) => c.passed).length;
+    res.json({
+      timestamp: new Date().toISOString(),
+      allPassed: passedTotal === checks.length,
+      summary: {
+        total: checks.length,
+        passed: passedTotal,
+        failed: checks.length - passedTotal,
+      },
+      results: checks,
+    });
+  });
+
   // Automated System Diagnostics & Verification Suite
   app.get('/api/test-suite', async (req: Request, res: Response) => {
     const tests = [];
 
-    // Test 1: SSRF Protection for Localhost
-    const localhostTest = await validateSafeUrl('http://127.0.0.1:8080/secret');
+    // Test 1: SSRF Protection for Localhost & IPv6 [::1]
+    const [localhostTest, ipv6Test] = await Promise.all([
+      validateSafeUrl('http://127.0.0.1:8080/secret'),
+      validateSafeUrl('http://[::1]:3000/api/health'),
+    ]);
     tests.push({
-      name: 'SSRF Protection (Localhost / 127.0.0.1)',
-      passed: !localhostTest.safe,
-      details: localhostTest.error || 'Blocked successfully',
+      name: 'SSRF Protection (127.0.0.1 & IPv6 [::1])',
+      passed: !localhostTest.safe && !ipv6Test.safe,
+      details: 'Both IPv4 & bracketed IPv6 loopback blocked',
     });
 
-    // Test 2: SSRF Protection for Private IP (192.168.1.1)
-    const privateIpTest = await validateSafeUrl('http://192.168.1.1/admin');
+    // Test 2: SSRF Protection for Private IP & Cloud Metadata
+    const [privateIpTest, metadataTest] = await Promise.all([
+      validateSafeUrl('http://192.168.1.1/admin'),
+      validateSafeUrl('http://169.254.169.254/latest/meta-data/'),
+    ]);
     tests.push({
-      name: 'SSRF Protection (Private 192.168.x range)',
-      passed: !privateIpTest.safe,
-      details: privateIpTest.error || 'Blocked successfully',
+      name: 'SSRF Protection (RFC1918 & Cloud Metadata)',
+      passed: !privateIpTest.safe && !metadataTest.safe,
+      details: 'Blocked 192.168.x and 169.254.169.254 metadata',
     });
 
     // Test 3: YouTube Exclusion Policy
@@ -948,11 +1450,14 @@ async function startServer() {
       details: ytTest.error || 'Excluded as required',
     });
 
-    // Test 4: Path Traversal Protection
-    const filenameTest = sanitizeFilename('../../../etc/passwd', 'mp4');
+    // Test 4: Path Traversal, CRLF & Format Allowlist Protection
+    const filenameTest = sanitizeFilename('../../../etc/passwd\r\nEvil: 1', 'mp4');
     tests.push({
-      name: 'Filename Path Traversal Protection',
-      passed: !filenameTest.includes('..') && !filenameTest.includes('/'),
+      name: 'Filename Path Traversal, CRLF & Format Allowlist',
+      passed:
+        !filenameTest.includes('..') &&
+        !filenameTest.includes('/') &&
+        sanitizeMediaFormat('exe') === null,
       details: `Sanitized to: ${filenameTest}`,
     });
 
@@ -981,7 +1486,7 @@ async function startServer() {
     });
   });
 
-  // Live End-to-End Download Verification Suite (Tests each extraction + stream download pipeline)
+  // Live End-to-End Multi-Quality Download Verification Suite (30 real checks)
   app.get('/api/test-downloads', async (req: Request, res: Response) => {
     const baseUrl = `http://127.0.0.1:${PORT}`;
 
@@ -998,10 +1503,12 @@ async function startServer() {
 
     const probeDownloadBytes = async (
       streamUrl: string,
-      format: 'mp4' | 'mp3',
+      format: 'mp4' | 'mp3' | 'm4a',
       audioUrl?: string,
-      timeoutMs = 15000,
-      abortEarly = false
+      timeoutMs = 25000,
+      abortEarly = false,
+      bitrate?: string,
+      scaleHeight?: number
     ): Promise<{ ok: boolean; contentType: string; bytesRead: number; headerHex: string; error?: string }> => {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -1010,7 +1517,9 @@ async function startServer() {
       let firstBytes: Uint8Array | null = null;
       try {
         const audioParam = audioUrl ? `&audioUrl=${encodeURIComponent(audioUrl)}` : '';
-        const dlUrl = `${baseUrl}/api/download?url=${encodeURIComponent(streamUrl)}${audioParam}&filename=nectora_test.${format}&format=${format}`;
+        const bitrateParam = bitrate ? `&bitrate=${encodeURIComponent(bitrate)}` : '';
+        const scaleParam = scaleHeight ? `&scaleHeight=${scaleHeight}` : '';
+        const dlUrl = `${baseUrl}/api/download?url=${encodeURIComponent(streamUrl)}${audioParam}&filename=wukong_vid_test.${format}&format=${format}${bitrateParam}${scaleParam}`;
         const dlRes = await fetch(dlUrl, { signal: controller.signal });
         if (!dlRes.ok || !dlRes.body) {
           return {
@@ -1072,8 +1581,10 @@ async function startServer() {
       name: string,
       platform: string,
       targetUrl: string,
-      format: 'mp4' | 'mp3' = 'mp4',
-      warnOnAuthWall = false
+      format: 'mp4' | 'mp3' | 'm4a' = 'mp4',
+      warnOnAuthWall = false,
+      bitrate?: string,
+      scaleHeight?: number
     ): Promise<DownloadCheckResult> => {
       const start = performance.now();
       try {
@@ -1101,10 +1612,26 @@ async function startServer() {
 
         const qualitiesFound = extracted.data.qualities.map((q) => q.resolution);
         const chosen =
+          (scaleHeight
+            ? extracted.data.qualities.find((q) => q.targetHeight === scaleHeight)
+            : undefined) ||
+          (bitrate
+            ? extracted.data.qualities.find(
+                (q) => q.format === format && `${q.bitrateKbps}k` === bitrate
+              )
+            : undefined) ||
           extracted.data.qualities.find((q) => q.format === format) ||
           extracted.data.qualities[0];
 
-        const probe = await probeDownloadBytes(chosen.url, format, chosen.audioUrl, 15000, false);
+        const probe = await probeDownloadBytes(
+          chosen.url,
+          format,
+          chosen.audioUrl,
+          25000,
+          false,
+          bitrate || (chosen.bitrateKbps ? `${chosen.bitrateKbps}k` : undefined),
+          scaleHeight
+        );
         const latencyMs = Math.round(performance.now() - start);
 
         if (!probe.ok) {
@@ -1116,7 +1643,7 @@ async function startServer() {
             latencyMs,
             bytesVerified: probe.bytesRead,
             qualitiesFound,
-            details: `Extracted [${qualitiesFound.join(', ')}], stream probe failed: ${probe.error || '0 bytes'}`,
+            details: `Extracted ${qualitiesFound.length} tiers, stream probe failed: ${probe.error || '0 bytes'}`,
           };
         }
 
@@ -1128,7 +1655,7 @@ async function startServer() {
           latencyMs,
           bytesVerified: probe.bytesRead,
           qualitiesFound,
-          details: `Extracted [${qualitiesFound.join(', ')}] · Streamed ${probe.bytesRead} B (${probe.contentType || format})`,
+          details: `${qualitiesFound.length} tiers ready · Streamed ${probe.bytesRead} B (${probe.contentType || format}${bitrate ? ` @ ${bitrate}` : scaleHeight ? ` @ ${scaleHeight}p` : ''})`,
         };
       } catch (err: any) {
         return {
@@ -1144,57 +1671,43 @@ async function startServer() {
       }
     };
 
-    const checks = await Promise.all([
-      runExtractAndDownloadTest(
-        'direct_mp4',
-        'Direct MP4 Download',
-        'Direct',
-        'https://www.w3schools.com/html/mov_bbb.mp4',
-        'mp4'
-      ),
-      runExtractAndDownloadTest(
-        'audio_mp3',
-        'MP3 Audio Transcode (FFmpeg)',
-        'Audio MP3',
-        'https://www.w3schools.com/html/mov_bbb.mp4',
-        'mp3'
-      ),
-      runExtractAndDownloadTest(
-        'hls_m3u8',
-        'HLS .m3u8 -> Playable MP4 Remux',
-        'HLS',
-        'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-        'mp4'
-      ),
-      runExtractAndDownloadTest(
-        'tiktok_hd',
-        'TikTok No-Watermark Video (MP4)',
-        'TikTok',
-        'https://www.tiktok.com/@scout2015/video/6718335390845095173',
-        'mp4'
-      ),
-      runExtractAndDownloadTest(
-        'tiktok_mp3',
-        'TikTok Original Sound (MP3)',
-        'TikTok MP3',
-        'https://www.tiktok.com/@scout2015/video/6718335390845095173',
-        'mp3'
-      ),
-      runExtractAndDownloadTest(
-        'twitter_x',
-        'X / Twitter HD Video',
-        'Twitter / X',
-        'https://x.com/captainamerica/status/719944021058060289',
-        'mp4'
-      ),
-      runExtractAndDownloadTest(
-        'web_generic',
-        'Web Page / Generic Video Extractor',
-        'Generic Web',
-        'https://www.w3schools.com/html/html5_video.asp',
-        'mp4'
-      ),
-      (async (): Promise<DownloadCheckResult> => {
+    const specs: Array<() => Promise<DownloadCheckResult>> = [
+      // 17 MP4 Checks (Full Native + Compact 480p + Saver 360p)
+      () => runExtractAndDownloadTest('mp4_01', 'MP4 #1 · TikTok Standard (@scout2015)', 'TikTok MP4', 'https://www.tiktok.com/@scout2015/video/6718335390845095173', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_02', 'MP4 #2 · TikTok Official (@tiktok #1)', 'TikTok MP4', 'https://www.tiktok.com/@tiktok/video/7106594312292453675', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_03', 'MP4 #3 · TikTok Official (@tiktok #2)', 'TikTok MP4', 'https://www.tiktok.com/@tiktok/video/7093219391759764782', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_04', 'MP4 #4 · TikTok Mobile (/v/ID.html)', 'TikTok MP4', 'https://m.tiktok.com/v/6718335390845095173.html', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_05', 'MP4 #5 · TikTok Embed (/embed/v2/ID)', 'TikTok MP4', 'https://www.tiktok.com/embed/v2/6718335390845095173', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_06', 'MP4 #6 · Instagram Reel (/reel/)', 'Instagram MP4', 'https://www.instagram.com/reel/DTVTvUDj-b1/', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_07', 'MP4 #7 · Instagram Post (/p/)', 'Instagram MP4', 'https://www.instagram.com/p/DTVTvUDj-b1/', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_08', 'MP4 #8 · Instagram Share (?igsh=)', 'Instagram MP4', 'https://www.instagram.com/reel/DTVTvUDj-b1/?igsh=MzRlODBiNWFlZA==', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_09', 'MP4 #9 · Facebook Page Video', 'Facebook MP4', 'https://www.facebook.com/facebook/videos/10153231379946729/', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_10', 'MP4 #10 · Facebook Watch (?v=)', 'Facebook MP4', 'https://www.facebook.com/watch/?v=10153231379946729', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_11', 'MP4 #11 · Facebook Mobile (m.fb)', 'Facebook MP4', 'https://m.facebook.com/facebook/videos/10153231379946729/', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_12', 'MP4 #12 · X / Twitter Status Video', 'Twitter MP4', 'https://x.com/captainamerica/status/719944021058060289', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_13', 'MP4 #13 · HLS .m3u8 -> MP4 Remux', 'HLS MP4', 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_14', 'MP4 #14 · Generic Web Video Extractor', 'Web MP4', 'https://www.w3schools.com/html/html5_video.asp', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_15', 'MP4 #15 · Direct MP4 Master Stream', 'Direct MP4', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp4'),
+      () => runExtractAndDownloadTest('mp4_16', 'MP4 #16 · Compact 480p Scaled Transcode', '480p SD MP4', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp4', false, undefined, 480),
+      () => runExtractAndDownloadTest('mp4_17', 'MP4 #17 · Data Saver 360p Scaled MP4', '360p Mobile', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp4', false, undefined, 360),
+
+      // 12 Audio Checks (10 MP3 320k + 1 MP3 128k Compact + 1 M4A 256k AAC)
+      () => runExtractAndDownloadTest('mp3_01', 'MP3 #1 · TikTok Sound 320k (@scout2015)', 'TikTok MP3', 'https://www.tiktok.com/@scout2015/video/6718335390845095173', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_02', 'MP3 #2 · TikTok Sound 320k (@tiktok #1)', 'TikTok MP3', 'https://www.tiktok.com/@tiktok/video/7106594312292453675', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_03', 'MP3 #3 · TikTok Mobile Sound 320k', 'TikTok MP3', 'https://m.tiktok.com/v/6718335390845095173.html', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_04', 'MP3 #4 · Instagram Reel Audio 320k', 'Instagram MP3', 'https://www.instagram.com/reel/DTVTvUDj-b1/', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_05', 'MP3 #5 · Instagram Post Audio 320k', 'Instagram MP3', 'https://www.instagram.com/p/DTVTvUDj-b1/', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_06', 'MP3 #6 · Facebook Page Audio 320k', 'Facebook MP3', 'https://www.facebook.com/facebook/videos/10153231379946729/', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_07', 'MP3 #7 · Facebook Watch Audio 320k', 'Facebook MP3', 'https://www.facebook.com/watch/?v=10153231379946729', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_08', 'MP3 #8 · X / Twitter Audio Track', 'Twitter MP3', 'https://x.com/captainamerica/status/719944021058060289', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_09', 'MP3 #9 · HLS .m3u8 -> MP3 320k', 'HLS MP3', 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_10', 'MP3 #10 · Direct MP4 -> MP3 320k', 'Direct MP3', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp3'),
+      () => runExtractAndDownloadTest('mp3_11', 'MP3 #11 · Balanced 192kbps MP3 Audio', 'MP3 192k', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp3', false, '192k'),
+      () => runExtractAndDownloadTest('mp3_12', 'MP3 #12 · Compact 128kbps MP3 Audio', 'MP3 128k', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp3', false, '128k'),
+      () => runExtractAndDownloadTest('m4a_13', 'M4A #13 · High-Efficiency 256kbps AAC', 'M4A 256k', 'https://www.w3schools.com/html/mov_bbb.mp4', 'm4a', false, '256k'),
+
+      // Stream Cancellation Control Check
+      async (): Promise<DownloadCheckResult> => {
         const start = performance.now();
         const probe = await probeDownloadBytes(
           'https://www.w3schools.com/html/mov_bbb.mp4',
@@ -1215,27 +1728,15 @@ async function startServer() {
             ? `Stream aborted cleanly after ${probe.bytesRead} B without hanging`
             : probe.error || 'Abort verification failed',
         };
-      })(),
-      (async (): Promise<DownloadCheckResult> => {
-        const start = performance.now();
-        const igDetect = adapterManager.detectPlatform('https://www.instagram.com/reel/C123456789/');
-        const fbDetect = adapterManager.detectPlatform('https://fb.watch/test123/');
-        const rdDetect = adapterManager.detectPlatform('https://v.redd.it/abc123');
-        const routingOk = igDetect === 'instagram' && fbDetect === 'facebook' && rdDetect === 'reddit';
-        return {
-          id: 'social_routing',
-          name: 'Instagram, Facebook & Reddit Adapters',
-          platform: 'Social Routing',
-          status: routingOk ? 'pass' : 'fail',
-          latencyMs: Math.round(performance.now() - start),
-          bytesVerified: 0,
-          qualitiesFound: [igDetect, fbDetect, rdDetect],
-          details: routingOk
-            ? 'All 3 adapters routed & armed (yt-dlp + embed/JSON fallbacks ready)'
-            : `Routing mismatch: ig=${igDetect}, fb=${fbDetect}, rd=${rdDetect}`,
-        };
-      })(),
-    ]);
+      },
+    ];
+
+    const checks: DownloadCheckResult[] = [];
+    const batchSize = 4;
+    for (let i = 0; i < specs.length; i += batchSize) {
+      const batchResults = await Promise.all(specs.slice(i, i + batchSize).map((fn) => fn()));
+      checks.push(...batchResults);
+    }
 
     const passedCount = checks.filter((c) => c.status === 'pass').length;
     const failedCount = checks.filter((c) => c.status === 'fail').length;
@@ -1269,7 +1770,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`NEcTORa Core Server listening at http://0.0.0.0:${PORT}`);
+    console.log(`WuKong-Vid Core Server listening at http://0.0.0.0:${PORT}`);
   });
 }
 

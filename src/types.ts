@@ -13,14 +13,16 @@ export type PlatformType =
 export interface QualityOption {
   id: string;
   label: string;
-  resolution: string; // '1080p' | '720p' | '480p' | 'audio'
-  format: 'mp4' | 'mp3' | 'webm';
+  resolution: string;
+  format: 'mp4' | 'mp3' | 'm4a' | 'webm';
   url: string;
   audioUrl?: string;
   isNative: boolean;
   fileSizeBytes?: number;
   fileSizeFormatted?: string;
   bitrateKbps?: number;
+  targetHeight?: number;
+  codec?: string;
   width?: number;
   height?: number;
   fps?: number;

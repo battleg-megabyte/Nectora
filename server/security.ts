@@ -2,10 +2,15 @@ import dns from 'dns/promises';
 import net from 'net';
 import path from 'path';
 
+export type AllowedMediaFormat = 'mp4' | 'mp3' | 'm4a' | 'webm';
+export type AllowedAudioBitrate = '320k' | '192k' | '128k' | '256k';
+export type AllowedScaleHeight = 2160 | 1440 | 1080 | 720 | 480 | 360;
+
 /**
- * Checks whether an IPv4 or IPv6 address is private, loopback, link-local, or reserved.
+ * Checks whether an IPv4 or IPv6 address is private, loopback, link-local, metadata, or reserved.
  */
-export function isPrivateOrReservedIp(ip: string): boolean {
+export function isPrivateOrReservedIp(rawIp: string): boolean {
+  const ip = (rawIp || '').trim().replace(/^\[|\]$/g, '').split('%')[0];
   if (!net.isIP(ip)) {
     return true; // Invalid IP is treated as unsafe
   }
@@ -13,7 +18,7 @@ export function isPrivateOrReservedIp(ip: string): boolean {
   // IPv4 Checks
   if (net.isIPv4(ip)) {
     const parts = ip.split('.').map(Number);
-    if (parts.length !== 4 || parts.some(p => isNaN(p) || p < 0 || p > 255)) {
+    if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) {
       return true;
     }
 
@@ -29,12 +34,14 @@ export function isPrivateOrReservedIp(ip: string): boolean {
     if (a === 172 && b >= 16 && b <= 31) return true;
     // Private Network 192.168.0.0/16
     if (a === 192 && b === 168) return true;
-    // Link-Local & Cloud Metadata (169.254.0.0/16)
+    // Link-Local & AWS/GCP/Azure Cloud Metadata (169.254.0.0/16)
     if (a === 169 && b === 254) return true;
-    // Carrier-grade NAT (100.64.0.0/10)
+    // Carrier-grade NAT (100.64.0.0/10) + Alibaba Cloud metadata (100.100.100.200)
     if (a === 100 && b >= 64 && b <= 127) return true;
-    // Documentation / Test networks (192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24)
+    // IETF Protocol Assignments / Benchmarking / Test networks
+    if (a === 192 && b === 0 && parts[2] === 0) return true;
     if (a === 192 && b === 0 && parts[2] === 2) return true;
+    if (a === 198 && b >= 18 && b <= 19) return true;
     if (a === 198 && b === 51 && parts[2] === 100) return true;
     if (a === 203 && b === 0 && parts[2] === 113) return true;
     // Multicast & Reserved (224.0.0.0/4, 240.0.0.0/4)
@@ -50,16 +57,35 @@ export function isPrivateOrReservedIp(ip: string): boolean {
     if (normalized === '::1' || normalized === '0:0:0:0:0:0:0:1') return true;
     // Unspecified
     if (normalized === '::' || normalized === '0:0:0:0:0:0:0:0') return true;
-    // Unique Local Address (fc00::/7, fd00::/8)
+    // Unique Local Address (fc00::/7, fd00::/8) incl. AWS IPv6 IMDS (fd00:ec2::254)
     if (normalized.startsWith('fc') || normalized.startsWith('fd')) return true;
     // Link-Local (fe80::/10)
-    if (normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb')) return true;
-    // IPv4-mapped IPv6 (::ffff:127.0.0.1 etc.)
+    if (
+      normalized.startsWith('fe8') ||
+      normalized.startsWith('fe9') ||
+      normalized.startsWith('fea') ||
+      normalized.startsWith('feb')
+    ) {
+      return true;
+    }
+    // Multicast (ff00::/8)
+    if (normalized.startsWith('ff')) return true;
+    // NAT64 (64:ff9b::/96)
+    if (normalized.startsWith('64:ff9b:')) return true;
+    // IPv4-mapped IPv6 dotted (::ffff:127.0.0.1) or hex (::ffff:7f00:1)
     if (normalized.includes('::ffff:')) {
       const ipv4Part = normalized.split('::ffff:')[1];
       if (ipv4Part && net.isIPv4(ipv4Part)) {
         return isPrivateOrReservedIp(ipv4Part);
       }
+      const hexPair = ipv4Part?.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+      if (hexPair) {
+        const hi = parseInt(hexPair[1], 16);
+        const lo = parseInt(hexPair[2], 16);
+        const mappedIpv4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+        return isPrivateOrReservedIp(mappedIpv4);
+      }
+      return true;
     }
     return false;
   }
@@ -68,15 +94,20 @@ export function isPrivateOrReservedIp(ip: string): boolean {
 }
 
 /**
- * Validates a target URL against SSRF attacks by checking the scheme, host,
- * and performing DNS resolution to verify all resolved IPs are public.
+ * Validates a target URL against SSRF attacks by checking the scheme, credentials,
+ * host, and performing DNS resolution to verify all resolved IPs are public.
  */
-export async function validateSafeUrl(rawUrl: string): Promise<{ safe: boolean; error?: string; parsedUrl?: URL }> {
+export async function validateSafeUrl(
+  rawUrl: string
+): Promise<{ safe: boolean; error?: string; parsedUrl?: URL }> {
   if (!rawUrl || typeof rawUrl !== 'string') {
     return { safe: false, error: 'Empty or invalid URL.' };
   }
 
-  // Check URL length limit (e.g. 8192 chars to support extra query params if needed)
+  if (/[\x00-\x1f\x7f]/.test(rawUrl)) {
+    return { safe: false, error: 'URL contains forbidden control characters.' };
+  }
+
   if (rawUrl.length > 8192) {
     return { safe: false, error: 'URL exceeds maximum length.' };
   }
@@ -93,29 +124,44 @@ export async function validateSafeUrl(rawUrl: string): Promise<{ safe: boolean; 
     return { safe: false, error: 'Only HTTP and HTTPS protocols are permitted.' };
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  // Reject embedded userinfo credentials (e.g. https://user:pass@127.0.0.1/)
+  if (parsed.username || parsed.password) {
+    return { safe: false, error: 'Embedded URL credentials are prohibited.' };
+  }
+
+  // Strip IPv6 square brackets before IP & host checks
+  const rawHost = parsed.hostname.toLowerCase();
+  const hostname = rawHost.replace(/^\[|\]$/g, '');
 
   // Strictly excluded platforms
   if (
     hostname === 'youtube.com' ||
     hostname === 'youtu.be' ||
+    hostname === 'youtubekids.com' ||
     hostname.endsWith('.youtube.com') ||
-    hostname.endsWith('.youtube-nocookie.com')
+    hostname.endsWith('.youtube-nocookie.com') ||
+    hostname.endsWith('.youtubekids.com') ||
+    hostname.endsWith('.youtube.googleapis.com')
   ) {
     return { safe: false, error: 'YouTube URLs are excluded under platform policy.' };
   }
 
-  // Explicit blacklist checks
+  // Explicit blacklist checks (loopback, mDNS, internal, cloud metadata hostnames)
   if (
     hostname === 'localhost' ||
     hostname.endsWith('.localhost') ||
     hostname.endsWith('.local') ||
     hostname.endsWith('.internal') ||
+    hostname === 'metadata.google.internal' ||
+    hostname === 'metadata.goog' ||
+    hostname === 'metadata' ||
+    hostname === '169.254.169.254' ||
     hostname === '127.0.0.1' ||
     hostname === '0.0.0.0' ||
-    hostname === '::1'
+    hostname === '::1' ||
+    hostname === '::'
   ) {
-    return { safe: false, error: 'Access to internal or loopback hosts is prohibited.' };
+    return { safe: false, error: 'Access to internal, loopback, or metadata hosts is prohibited.' };
   }
 
   // If the hostname is already an IP address, validate directly
@@ -126,7 +172,7 @@ export async function validateSafeUrl(rawUrl: string): Promise<{ safe: boolean; 
     return { safe: true, parsedUrl: parsed };
   }
 
-  // Perform DNS resolution to inspect resolved addresses
+  // Perform DNS resolution to inspect ALL resolved addresses
   try {
     const addresses = await dns.lookup(hostname, { all: true });
     if (!addresses || addresses.length === 0) {
@@ -146,20 +192,95 @@ export async function validateSafeUrl(rawUrl: string): Promise<{ safe: boolean; 
 }
 
 /**
- * Sanitizes a filename to protect against path traversal and malicious characters.
- * Ensures the extension is purely the requested format (.mp4, .mp3, etc.) and never contaminated with .html.
+ * Performs an HTTP fetch while validating every redirect hop via validateSafeUrl()
+ * to prevent redirect-based SSRF bypasses.
  */
-export function sanitizeFilename(rawName: string, defaultExt: string = 'mp4'): string {
-  const targetExt = defaultExt.toLowerCase().replace(/^\./, '') || 'mp4';
-  
-  if (!rawName || typeof rawName !== 'string') {
-    return `nectora_${Date.now()}.${targetExt}`;
+export async function safeFetch(
+  initialUrl: string,
+  init: RequestInit = {},
+  maxRedirects = 5
+): Promise<{ response: Response; finalUrl: string }> {
+  let currentUrl = initialUrl;
+
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    const check = await validateSafeUrl(currentUrl);
+    if (!check.safe) {
+      throw new Error(check.error || 'Redirect target blocked by SSRF policy.');
+    }
+
+    const res = await fetch(currentUrl, {
+      ...init,
+      redirect: 'manual',
+    });
+
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      await res.body?.cancel().catch(() => {});
+      if (!location) {
+        return { response: res, finalUrl: currentUrl };
+      }
+      if (hop === maxRedirects) {
+        throw new Error('Too many upstream redirects.');
+      }
+      currentUrl = new URL(location, currentUrl).toString();
+      continue;
+    }
+
+    return { response: res, finalUrl: currentUrl };
   }
 
-  // Remove null bytes and control chars
+  throw new Error('Exceeded maximum safe redirect hops.');
+}
+
+/**
+ * Validates that a remote URL is safe to pass as an FFmpeg `-i` input (no flag/CRLF/scheme injection).
+ */
+export function validateFfmpegRemoteUrl(url: string): boolean {
+  if (!url || typeof url !== 'string') return false;
+  if (url.startsWith('-')) return false;
+  if (/[\r\n\0\s]/.test(url)) return false;
+  return url.startsWith('https://') || url.startsWith('http://');
+}
+
+export function sanitizeMediaFormat(raw?: string): AllowedMediaFormat | null {
+  const fmt = (raw || 'mp4').toLowerCase().trim();
+  if (fmt === 'mp4' || fmt === 'mp3' || fmt === 'm4a' || fmt === 'webm') {
+    return fmt;
+  }
+  return null;
+}
+
+export function sanitizeAudioBitrate(raw?: string, fallback: AllowedAudioBitrate = '320k'): AllowedAudioBitrate {
+  const clean = (raw || '').toLowerCase().trim();
+  if (clean === '320k' || clean === '256k' || clean === '192k' || clean === '128k') {
+    return clean;
+  }
+  return fallback;
+}
+
+export function sanitizeVideoHeight(raw?: string): AllowedScaleHeight | undefined {
+  const n = Number(raw);
+  if (n === 2160 || n === 1440 || n === 1080 || n === 720 || n === 480 || n === 360) {
+    return n;
+  }
+  return undefined;
+}
+
+/**
+ * Sanitizes a filename to protect against path traversal, CRLF header injection, and malicious characters.
+ * Ensures the extension is strictly an allowlisted media format (.mp4, .mp3, .m4a, .webm).
+ */
+export function sanitizeFilename(rawName: string, defaultExt: string = 'mp4'): string {
+  const safeExt = sanitizeMediaFormat(defaultExt) || 'mp4';
+
+  if (!rawName || typeof rawName !== 'string') {
+    return `wukong_vid_${Date.now()}.${safeExt}`;
+  }
+
+  // Remove null bytes and control chars (stops CRLF header injection)
   let clean = rawName.replace(/[\x00-\x1f\x7f]/g, '');
-  // Remove path traversal components
-  clean = path.basename(clean);
+  // Remove path traversal components (Windows + POSIX)
+  clean = path.basename(clean.replace(/\\/g, '/'));
   // Strip any accidental .html or .htm extensions
   clean = clean.replace(/\.html?$/i, '');
   // Strip invalid characters for file systems across Windows, Mac, Linux, Android, iOS
@@ -171,15 +292,14 @@ export function sanitizeFilename(rawName: string, defaultExt: string = 'mp4'): s
   clean = clean.replace(/\.[a-zA-Z0-9]{1,6}$/, '');
 
   if (!clean) {
-    clean = `nectora_${Date.now()}`;
+    clean = `wukong_vid_${Date.now()}`;
   }
 
-  // Ensure reasonable length (under 60 chars before ext)
   if (clean.length > 60) {
     clean = clean.slice(0, 60);
   }
 
-  return `${clean}.${targetExt}`;
+  return `${clean}.${safeExt}`;
 }
 
 /**
@@ -188,9 +308,9 @@ export function sanitizeFilename(rawName: string, defaultExt: string = 'mp4'): s
  */
 export function sanitizeCookieHeader(rawCookies?: string): string {
   if (!rawCookies || typeof rawCookies !== 'string') return '';
-  
-  // Strip dangerous CRLF injection characters while preserving cookie key=value formatting
-  const clean = rawCookies.replace(/[\r\n]/g, '').trim();
+
+  // Strip dangerous CRLF/control injection characters while preserving cookie key=value formatting
+  const clean = rawCookies.replace(/[\x00-\x1f\x7f]/g, '').trim();
   if (clean.length > 16384) {
     return clean.slice(0, 16384);
   }

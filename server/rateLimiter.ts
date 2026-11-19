@@ -9,13 +9,19 @@ export class RateLimiter {
   private requests: Map<string, RateLimitRecord> = new Map();
   private maxRequests: number;
   private windowMs: number;
+  private readonly maxTrackedIps: number;
 
-  constructor(maxRequests = 120, windowMs = 60000) {
-    this.maxRequests = Number(process.env.RATE_LIMIT_REQUESTS) || maxRequests;
-    this.windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || windowMs;
+  constructor(
+    maxRequests = Number(process.env.RATE_LIMIT_REQUESTS) || 180,
+    windowMs = Number(process.env.RATE_LIMIT_WINDOW_MS) || 60000,
+    maxTrackedIps = 10000
+  ) {
+    this.maxRequests = maxRequests;
+    this.windowMs = windowMs;
+    this.maxTrackedIps = maxTrackedIps;
 
-    // Cleanup stale entries every 5 minutes
-    setInterval(() => this.cleanup(), 5 * 60 * 1000).unref();
+    // Cleanup stale entries every 2 minutes
+    setInterval(() => this.cleanup(), 2 * 60 * 1000).unref();
   }
 
   private cleanup() {
@@ -29,11 +35,23 @@ export class RateLimiter {
 
   public middleware() {
     return (req: Request, res: Response, next: NextFunction) => {
-      const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+      const forwarded = req.headers['x-forwarded-for'];
+      const rawIp =
+        (typeof forwarded === 'string' ? forwarded.split(',')[0]?.trim() : '') ||
+        req.socket.remoteAddress ||
+        'unknown';
+      const ip = rawIp.slice(0, 64);
       const now = Date.now();
 
       let record = this.requests.get(ip);
       if (!record || now > record.resetTime) {
+        if (!record && this.requests.size >= this.maxTrackedIps) {
+          this.cleanup();
+          if (this.requests.size >= this.maxTrackedIps) {
+            const oldestKey = this.requests.keys().next().value;
+            if (oldestKey) this.requests.delete(oldestKey);
+          }
+        }
         record = { count: 1, resetTime: now + this.windowMs };
         this.requests.set(ip, record);
       } else {
@@ -46,9 +64,11 @@ export class RateLimiter {
       res.setHeader('X-RateLimit-Reset', Math.ceil(record.resetTime / 1000));
 
       if (record.count > this.maxRequests) {
+        const retryAfterMs = Math.max(1000, record.resetTime - now);
+        res.setHeader('Retry-After', String(Math.ceil(retryAfterMs / 1000)));
         res.status(429).json({
           error: 'Rate limit exceeded. Please wait a moment before trying again.',
-          retryAfterMs: record.resetTime - now,
+          retryAfterMs,
         });
         return;
       }

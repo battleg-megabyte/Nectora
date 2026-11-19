@@ -89,8 +89,8 @@ export class DirectMediaAdapter implements PlatformAdapter {
             }
           }
         }
-      } catch (headErr) {
-        console.warn('Direct media probe warning:', headErr);
+      } catch {
+        // Probe fallback handled cleanly
       }
 
       // If the URL actually serves an HTML webpage, let GenericMediaAdapter extract the embedded video

@@ -115,8 +115,8 @@ export class GenericMediaAdapter implements PlatformAdapter {
           },
         };
       }
-    } catch (vimeoErr) {
-      console.warn('Vimeo config fallback notice:', vimeoErr);
+    } catch {
+      // Vimeo config fallback unavailable
     }
     return null;
   }
@@ -134,8 +134,8 @@ export class GenericMediaAdapter implements PlatformAdapter {
         if (ytdlpResult.success && ytdlpResult.data) {
           return ytdlpResult;
         }
-      } catch (ytdlpErr) {
-        console.warn('Generic yt-dlp notice:', ytdlpErr);
+      } catch {
+        // Continue to HTML/Vimeo fallback
       }
 
       // Method B: Vimeo public player config fallback (supports progressive + HLS streams)
@@ -287,8 +287,8 @@ export class GenericMediaAdapter implements PlatformAdapter {
             return { success: true, data: metadata };
           }
         }
-      } catch (crawlerErr) {
-        console.warn('HTML crawler notice:', crawlerErr);
+      } catch {
+        // Webpage HTML scan timed out or unavailable
       }
 
       return {

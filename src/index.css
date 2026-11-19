@@ -3,6 +3,15 @@
 @layer base {
   :root {
     color-scheme: dark;
+    /* Rose + Pink + White Palette */
+    --wk-canvas: #090409;
+    --wk-surface: #140A13;
+    --wk-surface-deep: #0D060C;
+    --wk-border: rgba(251, 113, 133, 0.24);
+    --wk-border-strong: rgba(244, 114, 182, 0.48);
+    --wk-rose: #F43F5E;
+    --wk-pink: #EC4899;
+    --wk-white: #FFFFFF;
   }
 
   html {
@@ -12,9 +21,10 @@
 
   body {
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background-color: #11131B;
-    color: #FAFAFA;
+    background-color: var(--wk-canvas);
+    color: #FFFFFF;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow-x: hidden;
   }
 
   h1, h2, h3, .font-display {
@@ -26,60 +36,74 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .font-signature {
+    font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+  }
+
   button:focus-visible,
   a:focus-visible,
   input:focus-visible,
   textarea:focus-visible {
-    outline: 2px solid #F472B6;
+    outline: 2px solid #FB7185;
     outline-offset: 2px;
   }
 }
 
-/* Studio atmospheric canvas with luminous Rose-Pink ambient aura */
+/* Layered Luminous Rose, Pink & Pearl-White Velvet Backdrop */
 .studio-canvas {
-  background-color: #11131B;
+  background-color: #090409;
   background-image:
-    radial-gradient(ellipse 85% 48% at 50% -8%, rgba(244, 114, 182, 0.20), transparent 72%),
-    radial-gradient(ellipse 55% 34% at 85% 15%, rgba(251, 113, 133, 0.11), transparent 72%),
-    radial-gradient(rgba(255, 255, 255, 0.065) 1px, transparent 1px);
-  background-size: 100% 100%, 100% 100%, 28px 28px;
+    /* Crisp subtle pearl-white top edge veil */
+    radial-gradient(ellipse 68% 28% at 50% -4%, rgba(255, 255, 255, 0.08), transparent 72%),
+    /* Primary lush rose silk bloom */
+    radial-gradient(ellipse 92% 48% at 50% 0%, rgba(244, 63, 94, 0.20), rgba(236, 72, 153, 0.09) 48%, transparent 78%),
+    /* Left ambient pink studio wash */
+    radial-gradient(circle 480px at 8% 32%, rgba(236, 72, 153, 0.11), transparent 70%),
+    /* Right ambient rose silk wash */
+    radial-gradient(circle 460px at 92% 76%, rgba(251, 113, 133, 0.10), transparent 70%),
+    /* Fine pearl architectural lattice lines */
+    linear-gradient(to right, rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    /* Soft rose micro-dots at grid intersections */
+    radial-gradient(rgba(251, 113, 133, 0.14) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    100% 100%,
+    48px 48px,
+    48px 48px,
+    48px 48px;
 }
 
-/* Smooth shimmer for loading highlights */
-@keyframes studio-shimmer {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(100%);
-  }
+/* Crisp Framed Box with Rose-Pink Outline & White Top Specular Edge */
+.wk-box {
+  background: linear-gradient(180deg, rgba(24, 11, 21, 0.94) 0%, rgba(15, 7, 14, 0.97) 100%);
+  border: 1px solid rgba(251, 113, 133, 0.24);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.09),
+    0 16px 40px -18px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
-.animate-shimmer {
-  position: relative;
-  overflow: hidden;
+.wk-box-well {
+  background-color: #0D060C;
+  border: 1px solid rgba(244, 114, 182, 0.18);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
 }
 
-.animate-shimmer::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, transparent, rgba(249, 168, 212, 0.24), transparent);
-  animation: studio-shimmer 1.5s infinite;
-}
-
-/* Extraction vertical laser scan animation */
+/* Extraction vertical scan beam */
 @keyframes studio-scan-y {
   0% {
     transform: translateY(-10%);
-    opacity: 0.35;
+    opacity: 0.25;
   }
   50% {
-    opacity: 1;
+    opacity: 0.95;
   }
   100% {
     transform: translateY(1100%);
-    opacity: 0.35;
+    opacity: 0.25;
   }
 }
 
@@ -103,21 +127,21 @@
   }
 }
 
-/* Custom studio scrollbar */
+/* Custom Rose-Pink Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #11131B;
+  background: #090409;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #3F3F46;
+  background: rgba(251, 113, 133, 0.28);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #F472B6;
+  background: #F43F5E;
 }

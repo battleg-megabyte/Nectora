@@ -1,58 +1,54 @@
-import monkeyKingIcon from '../assets/images/monkey_king_icon_1794952225765.jpg';
+import { WukongBrandMark } from './WukongBrandMark';
 
 interface FooterProps {
-  onOpenSecurity: () => void;
   onOpenDiagnostics: () => void;
   onOpenBatch: () => void;
 }
 
 export function Footer({
-  onOpenSecurity,
   onOpenDiagnostics,
   onOpenBatch,
 }: FooterProps) {
   return (
-    <footer className="w-full border-t border-white/[0.1] bg-[#11131B] mt-16 sm:mt-24 py-8 sm:py-10">
+    <footer className="w-full border-t border-rose-300/15 bg-[#090409]/90 mt-14 sm:mt-20 py-7 sm:py-9">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
-          <div className="flex flex-col items-center sm:items-start text-center sm:text-left gap-1.5">
-            <div className="flex items-center gap-2">
-              <img
-                src={monkeyKingIcon}
-                alt="NEcTORa Monkey King icon"
-                referrerPolicy="no-referrer"
-                className="w-6 h-6 rounded-lg object-cover border border-pink-400/50"
-              />
+          <div className="flex flex-col items-center sm:items-start text-center sm:text-left gap-2">
+            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
+              <WukongBrandMark size="sm" />
               <span className="font-display font-semibold text-sm text-white tracking-tight">
-                NEcTORa
+                WuKong<span className="text-rose-400">-</span>
+                <span className="text-pink-400">Vid</span>
+              </span>
+              <span className="text-rose-200/35" aria-hidden="true">
+                ·
+              </span>
+              <span className="inline-flex items-baseline gap-1.5">
+                <span className="text-xs font-medium text-white">Made by</span>
+                <span className="font-signature italic font-bold text-sm sm:text-base text-blue-400 tracking-wide">
+                  Eyad Saber
+                </span>
               </span>
             </div>
-            <p className="text-xs text-zinc-400 max-w-md">
-              Authorized personal media extraction utility. Ephemeral processing with strict SSRF protection. YouTube URLs are excluded.
+            <p className="text-xs text-rose-100/55 max-w-md">
+              Personal high-speed video and audio extraction utility for public media links. YouTube URLs are excluded.
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center justify-center gap-5 sm:gap-6 text-xs font-medium text-zinc-300">
+          <div className="flex flex-wrap items-center justify-center gap-5 sm:gap-6 text-xs font-medium text-rose-100/70">
             <button
               type="button"
               onClick={onOpenBatch}
-              className="py-2 hover:text-pink-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="py-2 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               Batch Queue
             </button>
             <button
               type="button"
-              onClick={onOpenSecurity}
-              className="py-2 hover:text-pink-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              Security Architecture
-            </button>
-            <button
-              type="button"
               onClick={onOpenDiagnostics}
-              className="py-2 hover:text-pink-300 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="py-2 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              System Diagnostics
+              Stream Check
             </button>
           </div>
         </div>

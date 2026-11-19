@@ -1,65 +1,59 @@
-import { Instagram, Film, Video, Twitter, MessageSquare } from 'lucide-react';
 import { motion } from 'motion/react';
+import { PlatformIcon } from './PlatformIcon';
 
 export function PlatformChips() {
   const platforms = [
     {
+      id: 'tiktok',
       name: 'TikTok',
-      detail: 'No watermark HD',
-      icon: Film,
-      color: 'text-cyan-400',
+      detail: 'Watermark-free HD & MP3',
     },
     {
+      id: 'instagram',
       name: 'Instagram',
-      detail: 'Reels & audio',
-      icon: Instagram,
-      color: 'text-pink-400',
+      detail: 'Reels, posts & audio',
     },
     {
+      id: 'facebook',
       name: 'Facebook',
-      detail: 'Reels & clips',
-      icon: Video,
-      color: 'text-blue-400',
+      detail: 'Watch, reels & clips',
     },
     {
-      name: 'X / Twitter',
-      detail: 'High bitrate MP4',
-      icon: Twitter,
-      color: 'text-sky-400',
+      id: 'twitter',
+      name: 'X',
+      detail: 'High-bitrate MP4',
     },
     {
-      name: 'Reddit & Direct',
-      detail: 'MP4, WEBM, streams',
-      icon: MessageSquare,
-      color: 'text-orange-400',
+      id: 'direct',
+      name: 'Direct & HLS',
+      detail: 'MP4, M3U8, Reddit, Vimeo',
     },
   ];
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, delay: 0.14, ease: [0.16, 1, 0.3, 1] }}
-      className="w-full max-w-3xl mx-auto mt-6"
+      transition={{ duration: 0.25, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
+      className="w-full max-w-3xl mx-auto mt-7 wk-box rounded-xl overflow-hidden"
     >
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-white/[0.09] rounded-2xl border border-pink-400/25 bg-[#191C26]/90 overflow-hidden shadow-lg shadow-black/25">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-rose-300/15">
         {platforms.map((p, idx) => {
-          const Icon = p.icon;
           const isLastOdd = idx === platforms.length - 1;
           return (
             <div
               key={p.name}
-              className={`flex flex-col px-3.5 py-3 transition-colors hover:bg-pink-400/[0.08] ${
+              className={`flex flex-col px-3.5 py-3 hover:bg-rose-400/[0.05] transition-colors ${
                 isLastOdd ? 'col-span-2 sm:col-span-1' : ''
               }`}
             >
-              <div className="flex items-center gap-1.5">
-                <Icon className={`w-3.5 h-3.5 shrink-0 ${p.color}`} />
-                <span className="text-xs font-semibold text-zinc-100 truncate">
+              <div className="flex items-center gap-2">
+                <PlatformIcon platform={p.id} className="w-3.5 h-3.5 shrink-0" />
+                <span className="text-xs font-semibold text-white truncate">
                   {p.name}
                 </span>
               </div>
-              <span className="text-[11px] text-zinc-400 mt-0.5 truncate">
+              <span className="text-[11px] text-rose-100/60 mt-0.5 truncate">
                 {p.detail}
               </span>
             </div>

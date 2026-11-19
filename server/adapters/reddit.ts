@@ -49,8 +49,8 @@ export class RedditAdapter implements PlatformAdapter {
               targetUrl = res.url;
             }
           }
-        } catch (err) {
-          console.warn('Reddit shortlink resolution notice:', err);
+        } catch {
+          // Continue with original Reddit URL
         }
       }
 
@@ -60,8 +60,8 @@ export class RedditAdapter implements PlatformAdapter {
         if (ytdlpResult.success && ytdlpResult.data) {
           return ytdlpResult;
         }
-      } catch (ytdlpErr) {
-        console.warn('Reddit yt-dlp notice:', ytdlpErr);
+      } catch {
+        // Handled cleanly; continue to Reddit JSON API fallback
       }
 
       // Method B: Reddit Public .json API Fallback
@@ -73,7 +73,7 @@ export class RedditAdapter implements PlatformAdapter {
           const jsonRes = await fetch(jsonUrl, {
             signal: AbortSignal.timeout(10000),
             headers: {
-              'User-Agent': 'NEcTORa/2.0 (Media Extractor)',
+              'User-Agent': 'WuKong-Vid/2.0 (Media Extractor)',
               Accept: 'application/json',
             },
           });
@@ -194,8 +194,8 @@ export class RedditAdapter implements PlatformAdapter {
             }
           }
         }
-      } catch (jsonErr) {
-        console.warn('Reddit JSON fallback notice:', jsonErr);
+      } catch {
+        // Fallback unavailable
       }
 
       return {
