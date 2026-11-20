@@ -141,10 +141,6 @@ export function MediaResultCard({
     setDownloadError(null);
   };
 
-  const renderPlatformIcon = () => {
-    return <PlatformIcon platform={media.platform} className="w-4 h-4 shrink-0" />;
-  };
-
   const handlePlayToggle = () => {
     if (!videoRef.current) return;
     if (isPlaying) {
@@ -458,7 +454,7 @@ export function MediaResultCard({
   const previewSource = selectedQuality?.url
     ? `/api/proxy-media?url=${encodeURIComponent(selectedQuality.url)}${
         selectedQuality.audioUrl ? `&audioUrl=${encodeURIComponent(selectedQuality.audioUrl)}` : ''
-      }${isSelectedAudio ? `&format=${selectedQuality.format}` : ''}`
+      }${isSelectedAudio ? `&format=${selectedQuality.format}${selectedQuality.bitrateKbps ? `&bitrate=${selectedQuality.bitrateKbps}k` : ''}` : ''}`
     : '';
 
   const isDownloadedCurrent =
@@ -487,16 +483,16 @@ export function MediaResultCard({
     <motion.section
       id="media-result-card"
       aria-label="Extracted media details"
-      initial={{ opacity: 0, y: 14 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -10 }}
-      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0, y: 18, scale: 0.985 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -12, scale: 0.985 }}
+      transition={{ type: 'spring', stiffness: 360, damping: 30 }}
       className="w-full max-w-4xl mx-auto mt-8 wk-box rounded-2xl overflow-hidden"
     >
       {/* Top Bar */}
       <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-3.5 border-b border-rose-300/15 bg-[#0D060C]">
         <div className="flex items-center gap-2 text-xs text-rose-100/80 min-w-0">
-          {renderPlatformIcon()}
+          <PlatformIcon platform={media.platform} className="h-5 min-w-[24px] shrink-0" />
           <span className="font-semibold text-white capitalize">{media.platform}</span>
           <span className="text-rose-300/35" aria-hidden="true">
             ·

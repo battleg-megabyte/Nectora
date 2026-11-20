@@ -47,8 +47,13 @@ function enrichQualities(meta: MediaMetadata): MediaMetadata {
   const videoOptions = existing.filter((q) => q.format !== 'mp3' && q.format !== 'm4a');
   const audioBase =
     existing.find((q) => q.format === 'mp3') ||
+    existing.find((q) => q.audioUrl) ||
     existing.find((q) => q.hasAudio !== false) ||
     videoOptions[0];
+  const resolvedAudioSourceUrl =
+    audioBase?.format === 'mp3'
+      ? audioBase.url
+      : audioBase?.audioUrl || audioBase?.url;
 
   const primaryVideo =
     videoOptions.find((q) => q.isNative) ||
@@ -155,7 +160,7 @@ function enrichQualities(meta: MediaMetadata): MediaMetadata {
   }
 
   const enrichedAudios: QualityOption[] = [];
-  if (audioBase?.url) {
+  if (resolvedAudioSourceUrl) {
     const dur = meta.durationSeconds || 0;
     const estBytes = (kbps: number) =>
       dur > 0 ? Math.round((kbps * 1000 * dur) / 8) : undefined;
@@ -166,7 +171,7 @@ function enrichQualities(meta: MediaMetadata): MediaMetadata {
       label: 'MP3 Audio · 320 kbps (Studio)',
       resolution: 'audio',
       format: 'mp3',
-      url: audioBase.url,
+      url: resolvedAudioSourceUrl,
       isNative: true,
       bitrateKbps: 320,
       codec: 'MP3 320k',
@@ -181,7 +186,7 @@ function enrichQualities(meta: MediaMetadata): MediaMetadata {
       label: 'MP3 Audio · 192 kbps (Balanced)',
       resolution: 'audio',
       format: 'mp3',
-      url: audioBase.url,
+      url: resolvedAudioSourceUrl,
       isNative: false,
       bitrateKbps: 192,
       codec: 'MP3 192k',
@@ -195,7 +200,7 @@ function enrichQualities(meta: MediaMetadata): MediaMetadata {
       label: 'MP3 Audio · 128 kbps (Compact)',
       resolution: 'audio',
       format: 'mp3',
-      url: audioBase.url,
+      url: resolvedAudioSourceUrl,
       isNative: false,
       bitrateKbps: 128,
       codec: 'MP3 128k',
@@ -209,7 +214,7 @@ function enrichQualities(meta: MediaMetadata): MediaMetadata {
       label: 'M4A Audio · 256 kbps (AAC)',
       resolution: 'audio',
       format: 'm4a',
-      url: audioBase.url,
+      url: resolvedAudioSourceUrl,
       isNative: false,
       bitrateKbps: 256,
       codec: 'AAC 256k',

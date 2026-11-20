@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+Allow: /api$
+Allow: /llms.txt
+Allow: /llms-full.txt
+Allow: /openapi.json
+Allow: /.well-known/
+Disallow: /api/
+
+Sitemap: https://ais-pre-gcwc4scgts426qmkyughvs-721143561104.europe-west2.run.app/sitemap.xml

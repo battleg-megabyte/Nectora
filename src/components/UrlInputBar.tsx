@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, ChangeEvent, FormEvent } from 'react';
 import { Link2, Clipboard, X, Loader2, ArrowRight } from 'lucide-react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { PlatformType } from '../types';
 import { PlatformIcon } from './PlatformIcon';
 
@@ -136,9 +136,6 @@ export function UrlInputBar({
   };
 
   const renderPlatformPrefix = () => {
-    if (detectedPlatform === 'unsupported') {
-      return <Link2 className="w-4 h-4 text-slate-400 shrink-0" />;
-    }
     const labelMap: Record<string, string> = {
       tiktok: 'TikTok',
       instagram: 'Instagram',
@@ -147,11 +144,34 @@ export function UrlInputBar({
       reddit: 'Reddit',
       direct: 'Direct',
     };
+
     return (
-      <span className="flex items-center gap-1.5 text-xs font-medium text-slate-100">
-        <PlatformIcon platform={detectedPlatform} className="w-4 h-4 shrink-0" />
-        <span className="hidden sm:inline">{labelMap[detectedPlatform] || 'Stream'}</span>
-      </span>
+      <AnimatePresence mode="popLayout" initial={false}>
+        {detectedPlatform === 'unsupported' ? (
+          <motion.span
+            key="generic-link"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            transition={{ duration: 0.16 }}
+            className="flex items-center"
+          >
+            <Link2 className="w-4 h-4 text-rose-200/65 shrink-0" />
+          </motion.span>
+        ) : (
+          <motion.span
+            key={detectedPlatform}
+            initial={{ opacity: 0, y: 4, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -4, scale: 0.9 }}
+            transition={{ type: 'spring', stiffness: 450, damping: 28 }}
+            className="flex items-center gap-1.5 text-xs font-medium text-slate-100"
+          >
+            <PlatformIcon platform={detectedPlatform} className="h-5 min-w-[24px] shrink-0" />
+            <span className="hidden sm:inline">{labelMap[detectedPlatform] || 'Stream'}</span>
+          </motion.span>
+        )}
+      </AnimatePresence>
     );
   };
 
@@ -188,9 +208,9 @@ export function UrlInputBar({
       transition={{ duration: 0.25, delay: 0.05, ease: [0.16, 1, 0.3, 1] }}
       className="w-full max-w-3xl mx-auto"
     >
-      {/* Crisp Outlined Command Deck */}
+      {/* Luminous Moonlit Command Deck */}
       <form onSubmit={handleSubmit} className="relative">
-        <div className="wk-box flex flex-col sm:flex-row sm:items-center rounded-xl focus-within:border-rose-400 focus-within:ring-2 focus-within:ring-rose-400/25 transition-all p-1.5 gap-1.5">
+        <div className="wk-command-deck flex flex-col sm:flex-row sm:items-center rounded-2xl focus-within:border-rose-300/75 focus-within:ring-2 focus-within:ring-rose-400/30 transition-all p-2 gap-2">
           <div className="flex items-center flex-1 min-w-0 gap-2">
             <div className="pl-2 pr-2 sm:pl-2.5 sm:pr-2.5 border-r border-rose-300/20 flex items-center shrink-0 min-h-[28px]">
               {renderPlatformPrefix()}
@@ -203,11 +223,20 @@ export function UrlInputBar({
               inputMode="url"
               value={url}
               onChange={handleInputChange}
-              placeholder="Paste video, reel, or media link..."
+              placeholder="Paste any public video, reel, or stream link..."
               disabled={isLoading}
               aria-label="Media URL"
-              className="w-full min-w-0 min-h-[44px] bg-transparent text-sm sm:text-base text-white placeholder-rose-100/40 px-1 py-2 focus:outline-none disabled:opacity-50"
+              className="w-full min-w-0 min-h-[44px] bg-transparent text-sm sm:text-base text-white placeholder-rose-100/45 px-1 py-2 focus:outline-none disabled:opacity-50"
             />
+
+            {!url && (
+              <kbd
+                title="Press / to focus URL input"
+                className="hidden lg:inline-flex items-center justify-center px-2 py-0.5 rounded bg-white/[0.07] border border-rose-300/20 text-[11px] font-mono text-rose-100/55 shrink-0 select-none"
+              >
+                /
+              </kbd>
+            )}
 
             {url ? (
               <button
@@ -215,7 +244,7 @@ export function UrlInputBar({
                 type="button"
                 onClick={handleClear}
                 disabled={isLoading}
-                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-rose-100/65 hover:text-white hover:bg-white/[0.08] transition-colors shrink-0 cursor-pointer"
+                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-rose-100/65 hover:text-white hover:bg-white/[0.08] transition-colors shrink-0 cursor-pointer"
                 title="Clear URL"
                 aria-label="Clear URL"
               >
@@ -226,7 +255,7 @@ export function UrlInputBar({
                 id="btn-paste-clipboard"
                 type="button"
                 onClick={handlePaste}
-                className="flex items-center gap-1.5 px-2.5 sm:px-3 min-h-[40px] rounded-lg text-xs font-medium text-white bg-[#0D060C] hover:bg-[#1E0E1C] border border-rose-300/20 hover:border-pink-400/55 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                className="flex items-center gap-1.5 px-3 min-h-[40px] rounded-xl text-xs font-medium text-white bg-[#140713]/90 hover:bg-[#230E20] border border-rose-300/25 hover:border-pink-400/60 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
                 title="Paste from clipboard"
               >
                 <Clipboard className="w-3.5 h-3.5 text-rose-400" />
@@ -235,11 +264,13 @@ export function UrlInputBar({
             )}
           </div>
 
-          <button
+          <motion.button
             id="btn-submit-analyze"
             type="submit"
             disabled={!url.trim() || isLoading}
-            className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 min-h-[46px] sm:min-h-[44px] rounded-lg font-semibold text-sm bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all active:scale-[0.98] whitespace-nowrap shrink-0 cursor-pointer shadow-md shadow-rose-950/50"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            className="wk-sheen-hover relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2 px-5 min-h-[46px] sm:min-h-[44px] rounded-xl font-semibold text-sm bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-lg shadow-rose-950/60 after:content-[''] after:pointer-events-none after:absolute after:inset-y-0 after:w-1/3 after:-translate-x-[150%] after:bg-gradient-to-r after:from-transparent after:via-white/30 after:to-transparent"
           >
             {isLoading ? (
               <>
@@ -252,7 +283,7 @@ export function UrlInputBar({
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
-          </button>
+          </motion.button>
         </div>
       </form>
 

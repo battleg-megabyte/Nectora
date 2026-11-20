@@ -93,6 +93,10 @@ export function isPrivateOrReservedIp(rawIp: string): boolean {
   return true;
 }
 
+const SAFE_HOST_CACHE_TTL_MS = 60_000;
+const SAFE_HOST_CACHE_MAX = 500;
+const safePublicHostCache = new Map<string, number>();
+
 /**
  * Validates a target URL against SSRF attacks by checking the scheme, credentials,
  * host, and performing DNS resolution to verify all resolved IPs are public.
@@ -172,6 +176,12 @@ export async function validateSafeUrl(
     return { safe: true, parsedUrl: parsed };
   }
 
+  const now = Date.now();
+  const cachedExpiry = safePublicHostCache.get(hostname);
+  if (cachedExpiry && cachedExpiry > now) {
+    return { safe: true, parsedUrl: parsed };
+  }
+
   // Perform DNS resolution to inspect ALL resolved addresses
   try {
     const addresses = await dns.lookup(hostname, { all: true });
@@ -187,6 +197,12 @@ export async function validateSafeUrl(
   } catch (err: any) {
     return { safe: false, error: `DNS resolution failed: ${err?.message || 'Host not found'}` };
   }
+
+  if (safePublicHostCache.size >= SAFE_HOST_CACHE_MAX) {
+    const oldest = safePublicHostCache.keys().next().value;
+    if (oldest) safePublicHostCache.delete(oldest);
+  }
+  safePublicHostCache.set(hostname, now + SAFE_HOST_CACHE_TTL_MS);
 
   return { safe: true, parsedUrl: parsed };
 }

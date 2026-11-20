@@ -8,19 +8,28 @@ import { AiAnalysisPanel } from './components/AiAnalysisPanel';
 import { DownloadHistory } from './components/DownloadHistory';
 import { BatchDownloadModal } from './components/BatchDownloadModal';
 import { SystemDiagnosticsModal } from './components/SystemDiagnosticsModal';
+import { AgentMcpModal } from './components/AgentMcpModal';
+import { SeoPageView } from './components/SeoPageView';
 import { Footer } from './components/Footer';
 import { OpeningSplash } from './components/OpeningSplash';
 import { WukongBrandMark } from './components/WukongBrandMark';
-import { playExtractionSound, stopExtractionSound } from './utils/soundEffects';
+import { WebsitePageSkeleton, MediaExtractionSkeleton } from './components/WebsiteSkeleton';
+import { playExtractionSound, stopExtractionSound, unlockAudioEngine } from './utils/soundEffects';
 import { MediaMetadata, DownloadHistoryItem, AnalysisStatus } from './types';
 import {
+  HOMEPAGE_SEO,
+  SEO_PAGES,
+  getSeoPageByPath,
+  normalizeSeoPath,
+} from '../shared/seoPages';
+import {
   AlertCircle,
+  ArrowRight,
   ArrowUpRight,
-  CheckCircle2,
-  Film,
-  Loader2,
+  Check,
+  Copy,
   Play,
-  Square,
+  SlidersHorizontal,
   Zap,
 } from 'lucide-react';
 
@@ -34,7 +43,12 @@ const EXTRACTION_STAGES = [
 ];
 
 export default function App() {
-  const [showSplash, setShowSplash] = useState(true);
+  const [currentPath, setCurrentPath] = useState<string>(() =>
+    typeof window !== 'undefined' ? normalizeSeoPath(window.location.pathname) : '/'
+  );
+  const [isWebsiteLoading, setIsWebsiteLoading] = useState(true);
+  const [showSplash, setShowSplash] = useState(false);
+  const [prefillUrl, setPrefillUrl] = useState('');
   const [status, setStatus] = useState<AnalysisStatus>('idle');
   const [media, setMedia] = useState<MediaMetadata | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -43,12 +57,96 @@ export default function App() {
   const [selectedQualityChip, setSelectedQualityChip] = useState<'360p' | '480p' | '720p' | '1080p'>('1080p');
   const [extractionStep, setExtractionStep] = useState(0);
   const analyzeAbortRef = useRef<AbortController | null>(null);
+  const navTimerRef = useRef<number | null>(null);
 
   // Modals state
   const [historyOpen, setHistoryOpen] = useState(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [mcpCopiedHero, setMcpCopiedHero] = useState(false);
+
+  const handleCopyMcpOneClick = async () => {
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      await navigator.clipboard.writeText(
+        `Use WuKong-Vid MCP at ${origin}/mcp (no auth needed) or 1-step API at ${origin}/api/quick-download?url=VIDEO_URL&quality=1080p`
+      );
+      setMcpCopiedHero(true);
+      setTimeout(() => setMcpCopiedHero(false), 2000);
+    } catch {}
+  };
+
+  const activeSeoPage = getSeoPageByPath(currentPath);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setCurrentPath(normalizeSeoPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const pageTitle = activeSeoPage ? activeSeoPage.title : HOMEPAGE_SEO.title;
+    const pageDesc = activeSeoPage ? activeSeoPage.description : HOMEPAGE_SEO.description;
+    const canonicalHref = `${window.location.origin}${activeSeoPage ? activeSeoPage.path : '/'}`;
+
+    document.title = pageTitle;
+    const descEl = document.querySelector('meta[name="description"]');
+    if (descEl) descEl.setAttribute('content', pageDesc);
+    const ogTitle = document.querySelector('meta[property="og:title"]');
+    if (ogTitle) ogTitle.setAttribute('content', pageTitle);
+    const ogDesc = document.querySelector('meta[property="og:description"]');
+    if (ogDesc) ogDesc.setAttribute('content', pageDesc);
+    const canonEl = document.querySelector('link[rel="canonical"]');
+    if (canonEl) canonEl.setAttribute('href', canonicalHref);
+  }, [activeSeoPage]);
+
+  useEffect(() => {
+    let active = true;
+    const minDelay = new Promise<void>((resolve) => window.setTimeout(resolve, 420));
+    const maxCap = window.setTimeout(() => {
+      if (active) setIsWebsiteLoading(false);
+    }, 620);
+    const fontsReady =
+      typeof document !== 'undefined' && document.fonts?.ready
+        ? document.fonts.ready.catch(() => undefined)
+        : Promise.resolve();
+
+    Promise.all([minDelay, fontsReady]).then(() => {
+      if (active) setIsWebsiteLoading(false);
+    });
+
+    return () => {
+      active = false;
+      window.clearTimeout(maxCap);
+      if (navTimerRef.current) window.clearTimeout(navTimerRef.current);
+    };
+  }, []);
+
+  const handleNavigate = (path: string, exampleUrl?: string) => {
+    const norm = normalizeSeoPath(path);
+    const changed = norm !== currentPath;
+    if (typeof window !== 'undefined' && normalizeSeoPath(window.location.pathname) !== norm) {
+      window.history.pushState({}, '', norm);
+    }
+    if (changed) {
+      if (navTimerRef.current) window.clearTimeout(navTimerRef.current);
+      setIsWebsiteLoading(true);
+      setCurrentPath(norm);
+      navTimerRef.current = window.setTimeout(() => {
+        setIsWebsiteLoading(false);
+        navTimerRef.current = null;
+      }, 200);
+    }
+    if (exampleUrl) {
+      setPrefillUrl(exampleUrl);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   useEffect(() => {
     try {
@@ -125,7 +223,7 @@ export default function App() {
   const handleResetHome = () => {
     handleAbortExtraction();
     setMedia(null);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    handleNavigate('/');
   };
 
   const handleAnalyzeUrl = async (url: string) => {
@@ -195,201 +293,134 @@ export default function App() {
           onOpenDiagnostics={() => setDiagnosticsOpen(true)}
           onOpenBatch={() => setBatchOpen(true)}
           onResetHome={handleResetHome}
+          onNavigate={handleNavigate}
           historyCount={history.length}
         />
 
         {/* Main Workspace */}
         <main className="flex-1 max-w-6xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 py-7 sm:py-14 flex flex-col items-center">
-          {/* Editorial Hero with Interactive Wukong + Video Download Crest */}
-          <motion.div
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-            className="text-center max-w-2xl mx-auto flex flex-col items-center space-y-3.5 sm:space-y-4 mb-6 sm:mb-8"
-          >
-            <button
-              type="button"
-              onClick={() => setShowSplash(true)}
-              title="Replay opening animation"
-              aria-label="WuKong-Vid emblem — replay intro animation"
-              className="group relative p-1.5 rounded-2xl bg-[#140A13] border border-rose-300/30 hover:border-white/70 ring-1 ring-inset ring-white/10 transition-all hover:scale-105 cursor-pointer shadow-lg shadow-rose-950/60"
-            >
-              <WukongBrandMark size="md" animatedArrow />
-            </button>
+          <AnimatePresence mode="wait">
+            {isWebsiteLoading ? (
+              <div key={`skel-${activeSeoPage ? 'seo' : 'home'}`} className="w-full">
+                <WebsitePageSkeleton variant={activeSeoPage ? 'seo' : 'home'} />
+              </div>
+            ) : activeSeoPage ? (
+              <motion.div
+                key={`seo-${activeSeoPage.path}`}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.2 }}
+                className="w-full"
+              >
+                <SeoPageView
+                  page={activeSeoPage}
+                  onNavigate={handleNavigate}
+                  onOpenMcpModal={() => setMcpOpen(true)}
+                  onOpenBatchModal={() => setBatchOpen(true)}
+                />
+              </motion.div>
+            ) : (
+              <motion.div
+                key="home-live-view"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.22 }}
+                className="w-full flex flex-col items-center"
+              >
+              {/* Editorial Hero — Streamlined Moonlit Lockup with Staggered Spring Choreography */}
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.42, ease: [0.16, 1, 0.3, 1] }}
+                className="relative text-center max-w-3xl mx-auto flex flex-col items-center space-y-3 sm:space-y-3.5 mb-6 sm:mb-7"
+              >
+                <div className="flex flex-col items-center gap-2">
+                  <motion.button
+                    type="button"
+                    whileHover={{ scale: 1.07, rotate: 1.5 }}
+                    whileTap={{ scale: 0.95 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 24 }}
+                    onClick={() => {
+                      unlockAudioEngine();
+                      setShowSplash(true);
+                    }}
+                    title="Replay opening animation"
+                    aria-label="WuKong-Vid emblem — replay intro animation"
+                    className="group relative p-1.5 rounded-2xl bg-[#140814]/70 backdrop-blur-md border border-rose-300/35 hover:border-white/80 ring-1 ring-inset ring-white/15 transition-colors cursor-pointer shadow-xl shadow-rose-950/60 animate-float-slow"
+                  >
+                    <WukongBrandMark size="md" animatedArrow />
+                  </motion.button>
 
-            <div className="flex items-baseline justify-center gap-2">
-              <span className="text-xs font-medium tracking-wide text-white">
-                Made by
-              </span>
-              <span className="font-signature italic font-bold text-base sm:text-lg text-blue-400 tracking-wide">
-                Eyad Saber
-              </span>
-            </div>
+                  <motion.div
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
+                    className="flex items-baseline justify-center gap-1.5"
+                  >
+                    <span className="text-[11px] font-medium tracking-wide text-white/90 drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
+                      Made by
+                    </span>
+                    <span className="font-signature italic font-bold text-base sm:text-lg text-blue-400 tracking-wide drop-shadow-[0_2px_10px_rgba(0,0,0,0.9)]">
+                      Eyad Saber
+                    </span>
+                  </motion.div>
+                </div>
 
-            <h1
-              className="font-display text-[1.75rem] min-[390px]:text-3xl sm:text-5xl font-bold tracking-tight text-white leading-[1.12]"
-              style={{ textWrap: 'balance' }}
-            >
-              Extract clean video streams in{' '}
-              <span className="bg-gradient-to-r from-rose-400 via-pink-400 to-white bg-clip-text text-transparent">
-                original resolution
-              </span>
-            </h1>
-            <p className="text-xs sm:text-base text-rose-100/75 leading-relaxed max-w-xl mx-auto px-1">
-              Paste a public link from TikTok, Instagram, Facebook, X, Reddit, Vimeo, or any direct video URL to extract 4K/1080p/720p/480p/360p MP4 streams plus 320kbps–128kbps MP3 and M4A audio.
-            </p>
-          </motion.div>
+                <motion.h1
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.1, ease: [0.16, 1, 0.3, 1] }}
+                  className="font-display text-[1.75rem] min-[390px]:text-3xl sm:text-[3.1rem] font-bold tracking-tight text-white leading-[1.1] drop-shadow-[0_4px_24px_rgba(0,0,0,0.78)]"
+                  style={{ textWrap: 'balance' }}
+                >
+                  Download Public Videos &amp; Audio in{' '}
+                  <span className="bg-gradient-to-r from-rose-300 via-pink-300 to-white bg-clip-text text-transparent">
+                    MP4, MP3, and M4A
+                  </span>
+                </motion.h1>
+                <motion.h2
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.38, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
+                  className="font-display text-sm sm:text-lg font-semibold text-rose-100/95 tracking-tight max-w-2xl mx-auto drop-shadow-[0_2px_14px_rgba(0,0,0,0.8)]"
+                >
+                  {HOMEPAGE_SEO.h2}
+                </motion.h2>
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ duration: 0.38, delay: 0.2 }}
+                  className="text-xs sm:text-sm text-rose-50/80 leading-relaxed max-w-xl mx-auto px-1 drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]"
+                >
+                  Extract HD MP4 videos and 320kbps MP3/M4A audio from TikTok, Instagram Reels, Facebook, X, Reddit, Vimeo, Batch Queue, REST API &amp; MCP agents.
+                </motion.p>
+              </motion.div>
 
-          {/* Responsive Command Input & Quality Target */}
-          <UrlInputBar
-            onAnalyze={handleAnalyzeUrl}
-            isLoading={status === 'analyzing'}
-            selectedQuality={selectedQualityChip}
-            onSelectQuality={setSelectedQualityChip}
-          />
+              {/* Responsive Command Input & Quality Target */}
+              <UrlInputBar
+                onAnalyze={handleAnalyzeUrl}
+                isLoading={status === 'analyzing'}
+                initialUrl={prefillUrl}
+                selectedQuality={selectedQualityChip}
+                onSelectQuality={setSelectedQualityChip}
+              />
 
-          {/* Supported Sources */}
-          <PlatformChips />
+              {/* Understated Zero-Liability Disclaimer Line */}
+              <p className="mt-3.5 text-[11px] sm:text-xs text-rose-100/70 text-center max-w-2xl px-2 leading-relaxed drop-shadow-[0_1px_8px_rgba(0,0,0,0.85)]">
+                {HOMEPAGE_SEO.notice}
+              </p>
 
-          {/* Animated Extraction States */}
+              {/* Interactive Supported Sources Strip */}
+              <PlatformChips onNavigate={handleNavigate} />
+
+          {/* Animated Extraction Skeleton & Result States */}
           <AnimatePresence mode="wait">
             {status === 'analyzing' && (
-              <motion.div
-                key="extraction-pipeline"
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -8 }}
-                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                aria-label="Extracting media streams"
-                className="w-full max-w-4xl mx-auto mt-8 wk-box rounded-2xl overflow-hidden"
-              >
-                {/* Live Extraction Header */}
-                <div className="px-4 sm:px-6 py-3.5 border-b border-rose-300/15 flex items-center justify-between gap-3 bg-[#0D060C]">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <Loader2 className="w-4 h-4 text-rose-400 animate-spin shrink-0" />
-                    <span className="text-xs sm:text-sm font-semibold text-white truncate">
-                      Extracting media streams
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2.5 sm:gap-3 shrink-0">
-                    <span className="text-[11px] font-mono text-rose-100/65 tabular-nums">
-                      Stage {extractionStep + 1} / {EXTRACTION_STAGES.length}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleAbortExtraction}
-                      aria-label="Stop extraction"
-                      className="flex items-center gap-1.5 px-3 min-h-[34px] rounded-lg text-xs font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-200 border border-red-500/35 transition-colors cursor-pointer"
-                    >
-                      <Square className="w-3 h-3 fill-current" />
-                      <span>Stop</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Extraction Stage Workspace */}
-                <div className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-12 gap-5 sm:gap-7 items-center">
-                  {/* Left: Precision Viewfinder Frame */}
-                  <div className="md:col-span-5 relative aspect-[9/16] max-h-[240px] sm:max-h-[300px] max-w-[240px] md:max-w-none mx-auto w-full rounded-xl wk-box-well overflow-hidden flex flex-col items-center justify-center p-5 sm:p-6">
-                    <span className="pointer-events-none absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-rose-400/75" />
-                    <span className="pointer-events-none absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-pink-400/75" />
-                    <span className="pointer-events-none absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-pink-400/75" />
-                    <span className="pointer-events-none absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-white/70" />
-
-                    {/* Clean Horizontal Scan Sweep */}
-                    <div className="pointer-events-none absolute inset-x-0 top-0 h-6 bg-gradient-to-b from-rose-500/30 to-transparent border-t border-white/80 animate-scan-y" />
-
-                    <WukongBrandMark size="lg" animatedArrow />
-
-                    <p className="mt-4 sm:mt-5 text-xs font-medium text-white text-center">
-                      Probing video &amp; audio tracks
-                    </p>
-                    <p className="mt-1 text-[11px] font-mono text-rose-100/55 text-center">
-                      HD stream verification
-                    </p>
-                  </div>
-
-                  {/* Right: Sequential Animated Stage Stepper */}
-                  <div className="md:col-span-7 space-y-4">
-                    <div className="space-y-1">
-                      <h2 className="font-display text-lg sm:text-xl font-semibold text-white">
-                        Analyzing source container
-                      </h2>
-                      <p className="text-xs text-rose-100/70">
-                        Resolving direct CDN stream URLs and preparing playable MP4 &amp; MP3 formats.
-                      </p>
-                    </div>
-
-                    {/* Precision Progress Bar */}
-                    <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden">
-                      <motion.div
-                        className="h-full bg-gradient-to-r from-rose-500 via-pink-400 to-white rounded-full"
-                        initial={{ width: '14%' }}
-                        animate={{ width: `${((extractionStep + 1) / EXTRACTION_STAGES.length) * 92}%` }}
-                        transition={{ duration: 0.45, ease: 'easeOut' }}
-                      />
-                    </div>
-
-                    {/* Stage Checklist */}
-                    <div className="rounded-xl border border-rose-300/20 bg-[#0D060C] divide-y divide-rose-300/15 overflow-hidden">
-                      {EXTRACTION_STAGES.map((stage, idx) => {
-                        const isDone = idx < extractionStep;
-                        const isActive = idx === extractionStep;
-                        return (
-                          <div
-                            key={stage.label}
-                            className={`flex items-center justify-between px-4 py-3 gap-3 transition-colors ${
-                              isActive ? 'bg-rose-500/[0.08]' : ''
-                            }`}
-                          >
-                            <div className="flex items-center gap-3 min-w-0">
-                              {isDone ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                              ) : isActive ? (
-                                <Loader2 className="w-4 h-4 text-rose-400 animate-spin shrink-0" />
-                              ) : (
-                                <Film className="w-4 h-4 text-rose-100/35 shrink-0" />
-                              )}
-                              <div className="min-w-0">
-                                <p
-                                  className={`text-xs font-semibold truncate ${
-                                    isActive
-                                      ? 'text-white'
-                                      : isDone
-                                        ? 'text-emerald-300'
-                                        : 'text-rose-100/50'
-                                  }`}
-                                >
-                                  {stage.label}
-                                </p>
-                                <p className="text-[11px] font-mono text-rose-100/50 truncate mt-0.5">
-                                  {stage.detail}
-                                </p>
-                              </div>
-                            </div>
-                            <span
-                              className={`text-[11px] font-mono shrink-0 ${
-                                isDone
-                                  ? 'text-emerald-400'
-                                  : isActive
-                                    ? 'text-pink-300'
-                                    : 'text-rose-100/35'
-                              }`}
-                            >
-                              {isDone ? 'Done' : isActive ? 'Running' : 'Queued'}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="flex items-center gap-2 text-[11px] text-rose-100/60 pt-1">
-                      <Zap className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-                      <span>Direct high-speed extraction · instant local saving</span>
-                    </div>
-                  </div>
-                </div>
-              </motion.div>
+              <MediaExtractionSkeleton
+                stageIndex={extractionStep}
+                stages={EXTRACTION_STAGES}
+                onStop={handleAbortExtraction}
+              />
             )}
 
             {status === 'error' && errorMessage && (
@@ -470,50 +501,162 @@ export default function App() {
             </motion.section>
           )}
 
-          {/* Editorial Capabilities Strip — Clean Framed Boxes */}
+          {/* Interactive Capabilities Bento Grid */}
           <motion.section
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.3, delay: 0.15 }}
+            initial={{ opacity: 0, y: 14 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.35, delay: 0.18, ease: [0.16, 1, 0.3, 1] }}
             aria-label="Capabilities"
             className="w-full max-w-4xl mx-auto mt-10 sm:mt-14 grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5"
           >
-            <div className="wk-box rounded-xl p-5 hover:border-rose-300/45 transition-colors space-y-2">
-              <h3 className="font-display font-semibold text-sm text-white flex items-center gap-2">
-                <span className="text-rose-400 font-mono text-xs">01.</span>
-                <span>Multi-Tier Stream Matrix</span>
-              </h3>
-              <p className="text-xs text-rose-100/70 leading-relaxed">
-                Extracts native 4K/1080p video, generates 720p/480p/360p compact MP4s, and converts 320kbps–128kbps MP3 or 256kbps M4A audio tracks.
-              </p>
-            </div>
+            <motion.a
+              href="/mp3-audio-extractor"
+              onClick={(e) => {
+                e.preventDefault();
+                handleNavigate('/mp3-audio-extractor');
+              }}
+              whileHover={{ y: -4 }}
+              whileTap={{ scale: 0.985 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              className="group wk-box rounded-2xl p-5 hover:border-rose-300/65 flex flex-col justify-between gap-4"
+            >
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-400/35 flex items-center justify-center shrink-0">
+                    <SlidersHorizontal className="w-4 h-4 text-rose-400" />
+                  </div>
+                  <h3 className="font-display font-semibold text-sm text-white group-hover:text-rose-200 transition-colors">
+                    MP4, MP3 &amp; M4A Extractor
+                  </h3>
+                </div>
+                <p className="text-xs text-rose-100/75 leading-relaxed">
+                  Save native 4K–360p MP4 plus 320kbps MP3 and 256kbps M4A audio across social platforms and direct streams.
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-rose-300 group-hover:text-white transition-colors">
+                <span>Explore MP3 &amp; M4A</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </span>
+            </motion.a>
 
-            <div className="wk-box rounded-xl p-5 hover:border-pink-300/45 transition-colors space-y-2">
-              <h3 className="font-display font-semibold text-sm text-white flex items-center gap-2">
-                <span className="text-pink-400 font-mono text-xs">02.</span>
-                <span>Instant Device Pop-Out</span>
-              </h3>
-              <p className="text-xs text-rose-100/70 leading-relaxed">
-                Watch your saved MP4 or play MP3/M4A audio immediately, open it in a dedicated tab, or share directly to your phone Files app.
-              </p>
-            </div>
+            <motion.button
+              type="button"
+              onClick={() => setBatchOpen(true)}
+              whileHover={{ y: -4 }}
+              whileTap={{ scale: 0.985 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              className="group wk-box rounded-2xl p-5 hover:border-pink-300/65 flex flex-col justify-between gap-4 text-left cursor-pointer"
+            >
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-pink-500/15 border border-pink-400/35 flex items-center justify-center shrink-0">
+                    <Play className="w-4 h-4 text-pink-400 fill-current ml-0.5" />
+                  </div>
+                  <h3 className="font-display font-semibold text-sm text-white group-hover:text-pink-200 transition-colors">
+                    Batch Queue &amp; Fast Save
+                  </h3>
+                </div>
+                <p className="text-xs text-rose-100/75 leading-relaxed">
+                  Queue multiple public URLs in one flow, track live download speed and progress, and export straight to device storage.
+                </p>
+              </div>
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-pink-300 group-hover:text-white transition-colors">
+                <span>Launch Batch Queue</span>
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </span>
+            </motion.button>
 
-            <div className="wk-box rounded-xl p-5 hover:border-white/35 transition-colors space-y-2">
-              <h3 className="font-display font-semibold text-sm text-white flex items-center gap-2">
-                <span className="text-white font-mono text-xs">03.</span>
-                <span>Batch Queue &amp; Fast Save</span>
-              </h3>
-              <p className="text-xs text-rose-100/70 leading-relaxed">
-                Process multiple public links consecutively in the Batch Queue with live transfer speed tracking and instant local history lookup.
-              </p>
-            </div>
+            <motion.div
+              whileHover={{ y: -4 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              className="wk-box rounded-2xl p-5 hover:border-emerald-300/55 flex flex-col justify-between gap-4"
+            >
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-400/35 flex items-center justify-center shrink-0">
+                    <Zap className="w-4 h-4 text-emerald-300" />
+                  </div>
+                  <h3 className="font-display font-semibold text-sm text-white">
+                    1-Click MCP &amp; API
+                  </h3>
+                </div>
+                <p className="text-xs text-rose-100/75 leading-relaxed">
+                  Zero-auth MCP endpoint + 1-step quick-download API. Copy once and paste straight into any AI assistant.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyMcpOneClick}
+                  className="flex-1 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/45 text-emerald-100 transition-colors cursor-pointer"
+                >
+                  {mcpCopiedHero ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-emerald-300" />
+                      <span>Copy for AI</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMcpOpen(true)}
+                  className="inline-flex items-center justify-center gap-1 px-3 py-2 rounded-xl text-xs font-medium bg-white/[0.06] hover:bg-white/[0.12] border border-white/20 text-white transition-colors cursor-pointer"
+                >
+                  <span>Open</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </motion.div>
           </motion.section>
+
+          {/* Compact Crawler & User Guides Bar */}
+          <nav
+            aria-label="Dedicated Extractors and Documentation"
+            className="w-full max-w-4xl mx-auto mt-5 wk-box rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-2.5 text-xs"
+          >
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-200/70">
+                Guides:
+              </span>
+              {SEO_PAGES.filter((p) => p.category !== 'legal').map((p) => (
+                <a
+                  key={p.path}
+                  href={p.path}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleNavigate(p.path);
+                  }}
+                  className="text-rose-100/80 hover:text-white transition-colors underline decoration-rose-400/30 underline-offset-4 hover:decoration-pink-400"
+                >
+                  {p.navLabel}
+                </a>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setMcpOpen(true)}
+              className="text-[11px] font-mono text-emerald-300 hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer shrink-0"
+            >
+              <span>1-Click MCP &amp; API</span>
+              <ArrowUpRight className="w-3 h-3" />
+            </button>
+          </nav>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </main>
 
         {/* Footer */}
         <Footer
           onOpenDiagnostics={() => setDiagnosticsOpen(true)}
           onOpenBatch={() => setBatchOpen(true)}
+          onOpenMcp={() => setMcpOpen(true)}
+          onNavigate={handleNavigate}
         />
 
         {/* Modals */}
@@ -549,6 +692,11 @@ export default function App() {
         <SystemDiagnosticsModal
           isOpen={diagnosticsOpen}
           onClose={() => setDiagnosticsOpen(false)}
+        />
+
+        <AgentMcpModal
+          isOpen={mcpOpen}
+          onClose={() => setMcpOpen(false)}
         />
       </div>
     </MotionConfig>

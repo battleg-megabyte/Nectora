@@ -28,6 +28,26 @@ import {
   generateFastTags,
   searchVideoContext,
 } from './server/gemini.js';
+import {
+  createMcpHandlers,
+  buildQualityDownloadLinks,
+  buildQuickLinksMap,
+  selectRecommendedQuality,
+} from './server/mcp.js';
+import {
+  buildLlmsTxt,
+  buildLlmsFullTxt,
+  buildOpenApiSpec,
+  buildMcpManifest,
+  buildAgentCard,
+  buildAiPluginManifest,
+} from './server/agentDocs.js';
+import {
+  SEO_PAGES,
+  getSeoPageByPath,
+  injectSeoIntoHtmlTemplate,
+  normalizeSeoPath,
+} from './shared/seoPages.js';
 
 dotenv.config();
 
@@ -279,10 +299,22 @@ async function transcodeAudioViaTempFallback(options: {
   try {
     const isHls = isHlsStreamUrl(mediaUrl);
     if (!isHls) {
-      const { response: upstreamRes } = await safeFetch(mediaUrl, {
+      let { response: upstreamRes } = await safeFetch(mediaUrl, {
         headers: upstreamHeaders,
         signal: abortCtrl.signal,
       });
+
+      if (upstreamRes.status === 401 || upstreamRes.status === 403) {
+        await upstreamRes.body?.cancel().catch(() => {});
+        const retryFetch = await safeFetch(mediaUrl, {
+          headers: {
+            'User-Agent': upstreamHeaders['User-Agent'] || 'Mozilla/5.0',
+            Accept: '*/*',
+          },
+          signal: abortCtrl.signal,
+        });
+        upstreamRes = retryFetch.response;
+      }
 
       if (!upstreamRes.ok || !upstreamRes.body) {
         if (!res.headersSent) {
@@ -440,14 +472,14 @@ async function startServer() {
       "frame-ancestors 'self' https://aistudio.google.com https://*.google.com https://*.googleusercontent.com; base-uri 'self'; object-src 'none'; form-action 'self'"
     );
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, Range, Cookie, X-Cookies, X-Security-Cookie'
+      'Content-Type, Accept, Authorization, Range, Cookie, X-Cookies, X-Security-Cookie, Mcp-Session-Id, MCP-Protocol-Version'
     );
     res.setHeader(
       'Access-Control-Expose-Headers',
-      'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, X-Expected-Bytes, Retry-After'
+      'Content-Length, Content-Range, Accept-Ranges, Content-Disposition, X-Expected-Bytes, Retry-After, Mcp-Session-Id'
     );
     if (req.method === 'OPTIONS') {
       res.sendStatus(204);
@@ -456,18 +488,134 @@ async function startServer() {
     next();
   });
 
+  // SEO & Google Search Console Support Routes
+  const resolvePublicOrigin = (req: Request): string => {
+    const rawHost =
+      (req.headers['x-forwarded-host'] as string)?.split(',')[0]?.trim() ||
+      (req.get('host') || '').trim();
+    if (rawHost) {
+      const isLoopback = /^(127\.0\.0\.1|localhost|0\.0\.0\.0)(:\d+)?$/i.test(rawHost);
+      const rawProto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || req.protocol || 'https';
+      const proto = isLoopback ? 'http' : rawProto;
+      return `${proto}://${rawHost}`;
+    }
+    const envUrl = (process.env.SHARED_APP_URL || process.env.APP_URL || '').trim().replace(/\/$/, '');
+    if (envUrl && /^https?:\/\//i.test(envUrl)) return envUrl;
+    return 'https://ais-pre-gcwc4scgts426qmkyughvs-721143561104.europe-west2.run.app';
+  };
+
+  app.get('/robots.txt', (req: Request, res: Response) => {
+    const origin = resolvePublicOrigin(req);
+    res
+      .type('text/plain')
+      .send(
+        `User-agent: *\nAllow: /\nAllow: /api$\nAllow: /llms.txt\nAllow: /llms-full.txt\nAllow: /openapi.json\nAllow: /.well-known/\nDisallow: /api/\n\nSitemap: ${origin}/sitemap.xml\n`
+      );
+  });
+
+  app.get('/sitemap.xml', (req: Request, res: Response) => {
+    const origin = resolvePublicOrigin(req);
+    const urls = [
+      { loc: `${origin}/`, lastmod: '2026-11-20', changefreq: 'weekly', priority: '1.0' },
+      ...SEO_PAGES.map((p) => ({
+        loc: `${origin}${p.path}`,
+        lastmod: p.lastmod,
+        changefreq: p.changefreq,
+        priority: p.priority,
+      })),
+    ];
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls
+      .map(
+        (u) =>
+          `  <url>\n    <loc>${u.loc}</loc>\n    <lastmod>${u.lastmod}</lastmod>\n    <changefreq>${u.changefreq}</changefreq>\n    <priority>${u.priority}</priority>\n  </url>`
+      )
+      .join('\n')}\n</urlset>\n`;
+    res.type('application/xml').send(xml);
+  });
+
+  // Google Search Console HTML file verification (direct token + optional env override)
+  app.get('/google7e9d578fe3b1d175.html', (_req: Request, res: Response) => {
+    res.type('text/html').send('google-site-verification: google7e9d578fe3b1d175.html');
+  });
+
+  app.get(/^\/google([a-zA-Z0-9_-]{8,64})\.html$/, (req: Request, res: Response, next) => {
+    const configured = (process.env.GOOGLE_SITE_VERIFICATION || '').trim().replace(/^google/, '').replace(/\.html$/, '');
+    const requestedToken = req.params[0];
+    if (configured && requestedToken === configured) {
+      res.type('text/html').send(`google-site-verification: google${configured}.html`);
+      return;
+    }
+    next();
+  });
+
+  // AI Agent Discovery & Machine-Readable Specifications
+  app.get('/llms.txt', (req: Request, res: Response) => {
+    res.type('text/plain; charset=utf-8').send(buildLlmsTxt(resolvePublicOrigin(req)));
+  });
+
+  app.get('/llms-full.txt', (req: Request, res: Response) => {
+    res.type('text/plain; charset=utf-8').send(buildLlmsFullTxt(resolvePublicOrigin(req)));
+  });
+
+  app.get('/openapi.json', (req: Request, res: Response) => {
+    res.json(buildOpenApiSpec(resolvePublicOrigin(req)));
+  });
+
+  app.get('/.well-known/mcp.json', (req: Request, res: Response) => {
+    res.json(buildMcpManifest(resolvePublicOrigin(req)));
+  });
+
+  app.get('/.well-known/agent.json', (req: Request, res: Response) => {
+    res.json(buildAgentCard(resolvePublicOrigin(req)));
+  });
+
+  app.get('/.well-known/ai-plugin.json', (req: Request, res: Response) => {
+    res.json(buildAiPluginManifest(resolvePublicOrigin(req)));
+  });
+
+  // Model Context Protocol (MCP) Streamable HTTP + JSON-RPC 2.0 + SSE Server
+  // Note: GET /mcp negotiates HTML documentation for browsers/crawlers vs SSE/JSON for MCP clients.
+  const mcpHandlers = createMcpHandlers(resolvePublicOrigin, PORT);
+  app.get('/mcp', (req: Request, res: Response, next) => {
+    const accept = (req.headers.accept || '').toLowerCase();
+    const wantsSse = accept.includes('text/event-stream');
+    const wantsHtml = accept.includes('text/html');
+    if (wantsHtml && !wantsSse) {
+      next();
+      return;
+    }
+    mcpHandlers.handleGet(req, res);
+  });
+  app.post('/mcp', rateLimiter.middleware(), mcpHandlers.handlePost);
+  app.delete('/mcp', mcpHandlers.handleDelete);
+
   // Apply rate limiter on API routes
   app.use('/api', rateLimiter.middleware());
 
+  app.get('/api/mcp', mcpHandlers.handleGet);
+  app.post('/api/mcp', mcpHandlers.handlePost);
+  app.delete('/api/mcp', mcpHandlers.handleDelete);
+
   // Health check endpoint
   app.get('/api/health', (req: Request, res: Response) => {
+    const origin = resolvePublicOrigin(req);
     res.json({
       status: 'ok',
       service: 'WuKong-Vid Core',
-      version: '1.1.0',
-      supportedPlatforms: ['tiktok', 'instagram', 'facebook', 'twitter', 'reddit', 'direct_media'],
+      version: '1.2.0',
+      supportedPlatforms: ['tiktok', 'instagram', 'facebook', 'twitter', 'reddit', 'vimeo', 'direct_media'],
       excludedPlatforms: ['youtube'],
       supportedQualities: ['2160p', '1440p', '1080p', '720p', '480p', '360p', 'mp3_320k', 'mp3_192k', 'mp3_128k', 'm4a_256k'],
+      mcpEndpoint: `${origin}/mcp`,
+      agentDocs: {
+        llmsTxt: `${origin}/llms.txt`,
+        llmsFullTxt: `${origin}/llms-full.txt`,
+        openApi: `${origin}/openapi.json`,
+        mcpManifest: `${origin}/.well-known/mcp.json`,
+        agentCard: `${origin}/.well-known/agent.json`,
+        quickDownload: `${origin}/api/quick-download`,
+        batchAnalyze: `${origin}/api/batch-analyze`,
+      },
       limits: {
         maxFileSizeMb: Number(process.env.MAX_FILE_SIZE_MB) || 500,
         rateLimitPerMinute: Number(process.env.RATE_LIMIT_REQUESTS) || 180,
@@ -475,12 +623,17 @@ async function startServer() {
     });
   });
 
-  // Media analysis endpoint
+  // Media analysis endpoint (includes direct downloadUrl, previewUrl, and quickLinks map for AI agents)
   app.post('/api/analyze', async (req: Request, res: Response) => {
     try {
-      const { url, cookies } = req.body;
-      const clientCookies = cookies || (req.headers['x-cookies'] as string) || (req.headers['x-security-cookie'] as string) || (req.headers['cookie'] as string) || undefined;
-      
+      const { url, cookies, preferred_quality } = req.body || {};
+      const clientCookies =
+        cookies ||
+        (req.headers['x-cookies'] as string) ||
+        (req.headers['x-security-cookie'] as string) ||
+        (req.headers['cookie'] as string) ||
+        undefined;
+
       if (!url || typeof url !== 'string') {
         res.status(400).json({ error: 'URL parameter is required.' });
         return;
@@ -494,17 +647,97 @@ async function startServer() {
       }
 
       const result = await adapterManager.extract(url, clientCookies);
-      if (!result.success) {
+      if (!result.success || !result.data) {
         res.status(result.statusCode || 400).json({
           error: result.error || 'Failed to extract media details.',
         });
         return;
       }
 
-      res.json(result.data);
+      const origin = resolvePublicOrigin(req);
+      const preferred = typeof preferred_quality === 'string' ? preferred_quality : '1080p';
+      const meta = result.data;
+      const quickLinks = buildQuickLinksMap(origin, url, meta.title, meta.qualities, preferred);
+      const enrichedQualities = meta.qualities.map((q) => ({
+        ...q,
+        ...buildQualityDownloadLinks(origin, meta.title, q),
+      }));
+      const recommended = selectRecommendedQuality(meta.qualities, preferred);
+
+      res.json({
+        ...meta,
+        quickLinks,
+        oneStepDownloadUrl: quickLinks.oneStep,
+        recommended: recommended
+          ? {
+              ...recommended,
+              ...buildQualityDownloadLinks(origin, meta.title, recommended),
+            }
+          : undefined,
+        qualities: enrichedQualities,
+      });
     } catch (err: any) {
       console.error('Analyze error:', err);
       res.status(500).json({ error: 'An error occurred while analyzing the media link.' });
+    }
+  });
+
+  // Fast concurrent batch analysis endpoint (up to 10 public URLs in one request)
+  app.post('/api/batch-analyze', async (req: Request, res: Response) => {
+    try {
+      const rawUrls = Array.isArray(req.body?.urls)
+        ? req.body.urls.filter((u: unknown): u is string => typeof u === 'string' && u.trim().length > 0)
+        : [];
+      if (rawUrls.length === 0) {
+        res.status(400).json({ error: 'Provide 1 to 10 public URLs in urls array.' });
+        return;
+      }
+
+      const origin = resolvePublicOrigin(req);
+      const preferred = typeof req.body?.preferred_quality === 'string' ? req.body.preferred_quality : '1080p';
+      const cookies =
+        (typeof req.body?.cookies === 'string' ? req.body.cookies : undefined) ||
+        (req.headers['x-cookies'] as string) ||
+        undefined;
+      const urls = rawUrls.slice(0, 10);
+
+      const results = await Promise.all(
+        urls.map(async (rawUrl: string) => {
+          const cleanUrl = rawUrl.trim();
+          const validation = await validateSafeUrl(cleanUrl);
+          if (!validation.safe) {
+            return { url: cleanUrl, success: false, error: validation.error || 'Forbidden URL' };
+          }
+          const extracted = await adapterManager.extract(cleanUrl, cookies);
+          if (!extracted.success || !extracted.data) {
+            return { url: cleanUrl, success: false, error: extracted.error || 'Extraction failed' };
+          }
+          const meta = extracted.data;
+          const quickLinks = buildQuickLinksMap(origin, cleanUrl, meta.title, meta.qualities, preferred);
+          const rec = selectRecommendedQuality(meta.qualities, preferred);
+          return {
+            url: cleanUrl,
+            success: true,
+            platform: meta.platform,
+            title: meta.title,
+            durationFormatted: meta.durationFormatted,
+            quickLinks,
+            recommended: rec
+              ? { id: rec.id, label: rec.label, format: rec.format, ...buildQualityDownloadLinks(origin, meta.title, rec) }
+              : undefined,
+            qualitiesCount: meta.qualities.length,
+          };
+        })
+      );
+
+      res.json({
+        total: results.length,
+        succeeded: results.filter((r) => r.success).length,
+        results,
+      });
+    } catch (err: any) {
+      console.error('Batch analyze error:', err);
+      res.status(500).json({ error: 'An error occurred while batch analyzing links.' });
     }
   });
 
@@ -572,10 +805,14 @@ async function startServer() {
 
       // If format is MP3 or M4A, stream direct native MP3 or transcode audio in real-time
       if (format === 'mp3' || format === 'm4a') {
+        const previewBitrate = sanitizeAudioBitrate(
+          req.query.bitrate as string | undefined,
+          format === 'm4a' ? '256k' : '320k'
+        );
         const upstreamHeaders = buildUpstreamHeaders(parsedMediaUrl, clientCookies);
         const isHls = isHlsStreamUrl(mediaUrl);
 
-        if (format === 'mp3' && !isHls && (parsedMediaUrl.pathname.toLowerCase().endsWith('.mp3') || mediaUrl.includes('mime_type=audio_mpeg'))) {
+        if (format === 'mp3' && previewBitrate === '320k' && !isHls && (parsedMediaUrl.pathname.toLowerCase().endsWith('.mp3') || mediaUrl.includes('mime_type=audio_mpeg'))) {
           try {
             const { response: directAudio } = await safeFetch(mediaUrl, { headers: upstreamHeaders });
             const ct = (directAudio.headers.get('content-type') || '').toLowerCase();
@@ -604,7 +841,9 @@ async function startServer() {
                 '-vn',
                 '-map', '0:a:0',
                 '-c:a', 'aac',
-                '-b:a', '256k',
+                '-b:a', previewBitrate,
+                '-ar', '44100',
+                '-ac', '2',
                 '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
                 '-f', 'mp4',
                 'pipe:1',
@@ -617,7 +856,7 @@ async function startServer() {
                 '-vn',
                 '-map', '0:a:0',
                 '-c:a', 'libmp3lame',
-                '-b:a', '320k',
+                '-b:a', previewBitrate,
                 '-ar', '44100',
                 '-ac', '2',
                 '-f', 'mp3',
@@ -712,20 +951,36 @@ async function startServer() {
     }
   });
 
-  // Secure download streaming endpoint (multi-resolution MP4 + multi-bitrate MP3/M4A + safeFetch SSRF redirect guard)
-  app.get('/api/download', async (req: Request, res: Response) => {
+  // Shared secure download streamer (used by both /api/download and 1-step /api/quick-download)
+  const streamMediaDownload = async (options: {
+    req: Request;
+    res: Response;
+    mediaUrl: string;
+    audioUrl?: string;
+    rawFilename?: string;
+    rawFormat?: string;
+    rawBitrate?: string;
+    rawScaleHeight?: string;
+    fileSizeBytes?: string;
+  }) => {
+    const {
+      req,
+      res,
+      mediaUrl,
+      audioUrl = '',
+      rawFilename = 'wukong_vid_media.mp4',
+      rawFormat = 'mp4',
+      rawBitrate,
+      rawScaleHeight,
+      fileSizeBytes = '',
+    } = options;
     try {
-      const mediaUrl = req.query.url as string;
-      const audioUrl = (req.query.audioUrl as string) || '';
-      const rawFilename = (req.query.filename as string) || 'wukong_vid_media.mp4';
-      const rawFormat = (req.query.format as string) || 'mp4';
       const format = sanitizeMediaFormat(rawFormat);
       const bitrate = sanitizeAudioBitrate(
-        req.query.bitrate as string | undefined,
+        rawBitrate,
         format === 'm4a' ? '256k' : '320k'
       );
-      const scaleHeight = sanitizeVideoHeight(req.query.scaleHeight as string | undefined);
-      const fileSizeBytes = (req.query.fileSizeBytes as string) || '';
+      const scaleHeight = sanitizeVideoHeight(rawScaleHeight);
 
       if (!mediaUrl) {
         res.status(400).json({ error: 'Missing target media URL.' });
@@ -888,6 +1143,7 @@ async function startServer() {
                 '-vf',
                 `scale=w='if(gt(iw,ih),-2,trunc(min(iw,${scaleHeight})/2)*2)':h='if(gt(iw,ih),trunc(min(ih,${scaleHeight})/2)*2,-2)'`,
                 '-c:v', 'libx264',
+                '-pix_fmt', 'yuv420p',
                 '-preset', 'veryfast',
                 '-crf', scaleHeight <= 360 ? '30' : '28',
                 '-maxrate', scaleHeight <= 360 ? '360k' : '620k',
@@ -936,6 +1192,7 @@ async function startServer() {
           '-vf',
           `scale=w='if(gt(iw,ih),-2,trunc(min(iw,${scaleHeight})/2)*2)':h='if(gt(iw,ih),trunc(min(ih,${scaleHeight})/2)*2,-2)'`,
           '-c:v', 'libx264',
+          '-pix_fmt', 'yuv420p',
           '-preset', 'veryfast',
           '-crf', scaleHeight <= 360 ? '30' : scaleHeight <= 480 ? '28' : '26',
           '-maxrate', maxRate,
@@ -1058,6 +1315,79 @@ async function startServer() {
       console.error('Download stream error:', err);
       if (!res.headersSent) {
         res.status(500).json({ error: err?.message || 'Failed to process download stream.' });
+      }
+    }
+  };
+
+  // Secure download streaming endpoint (multi-resolution MP4 + multi-bitrate MP3/M4A + safeFetch SSRF redirect guard)
+  app.get('/api/download', async (req: Request, res: Response) => {
+    await streamMediaDownload({
+      req,
+      res,
+      mediaUrl: req.query.url as string,
+      audioUrl: (req.query.audioUrl as string) || '',
+      rawFilename: (req.query.filename as string) || 'wukong_vid_media.mp4',
+      rawFormat: (req.query.format as string) || 'mp4',
+      rawBitrate: req.query.bitrate as string | undefined,
+      rawScaleHeight: req.query.scaleHeight as string | undefined,
+      fileSizeBytes: (req.query.fileSizeBytes as string) || '',
+    });
+  });
+
+  // 1-Step Extract & Stream endpoint for AI agents and direct downloads (zero round-trips)
+  app.get('/api/quick-download', async (req: Request, res: Response) => {
+    try {
+      const targetUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+      const quality = typeof req.query.quality === 'string' ? req.query.quality.trim() : '1080p';
+      const customFilename = typeof req.query.filename === 'string' ? req.query.filename.trim() : '';
+
+      if (!targetUrl) {
+        res.status(400).json({ error: 'Missing required url query parameter.' });
+        return;
+      }
+
+      const validation = await validateSafeUrl(targetUrl);
+      if (!validation.safe) {
+        res.status(400).json({ error: validation.error || 'Target URL is not permitted.' });
+        return;
+      }
+
+      const clientCookies =
+        (req.headers['x-cookies'] as string) ||
+        (req.headers['x-security-cookie'] as string) ||
+        (req.headers['cookie'] as string) ||
+        undefined;
+
+      const extracted = await adapterManager.extract(targetUrl, clientCookies);
+      if (!extracted.success || !extracted.data || extracted.data.qualities.length === 0) {
+        res.status(extracted.statusCode || 400).json({
+          error: extracted.error || 'Could not extract media stream from URL.',
+        });
+        return;
+      }
+
+      const meta = extracted.data;
+      const chosen = selectRecommendedQuality(meta.qualities, quality) || meta.qualities[0];
+      const baseFilename = customFilename || meta.title || 'wukong_vid_media';
+
+      await streamMediaDownload({
+        req,
+        res,
+        mediaUrl: chosen.url,
+        audioUrl: chosen.audioUrl,
+        rawFilename: baseFilename,
+        rawFormat: chosen.format,
+        rawBitrate: chosen.bitrateKbps ? `${chosen.bitrateKbps}k` : undefined,
+        rawScaleHeight:
+          chosen.format === 'mp4' && chosen.targetHeight && chosen.targetHeight <= 720 && !chosen.isNative
+            ? String(chosen.targetHeight)
+            : undefined,
+        fileSizeBytes: chosen.fileSizeBytes ? String(chosen.fileSizeBytes) : '',
+      });
+    } catch (err: any) {
+      console.error('Quick download error:', err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: err?.message || 'Quick download failed.' });
       }
     }
   });
@@ -1754,18 +2084,40 @@ async function startServer() {
     });
   });
 
-  // Vite Middleware Setup
+  // Crawl-ready SSR HTML Injection + Vite / Production SPA Fallback
+  const seoRoutePaths = ['/', ...SEO_PAGES.map((p) => p.path)];
+
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
+
+    app.get(seoRoutePaths, async (req: Request, res: Response, next) => {
+      try {
+        const origin = resolvePublicOrigin(req);
+        const normPath = normalizeSeoPath(req.path);
+        const seoPage = getSeoPageByPath(normPath) ?? null;
+        const rawTemplate = fs.readFileSync(path.join(process.cwd(), 'index.html'), 'utf-8');
+        const injected = injectSeoIntoHtmlTemplate(rawTemplate, seoPage, origin);
+        const transformed = await vite.transformIndexHtml(req.originalUrl, injected);
+        res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(transformed);
+      } catch (err) {
+        next(err);
+      }
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+    app.use(express.static(distPath, { index: false }));
+    app.get('*', (req: Request, res: Response) => {
+      const origin = resolvePublicOrigin(req);
+      const normPath = normalizeSeoPath(req.path);
+      const seoPage = getSeoPageByPath(normPath) ?? null;
+      const distTemplate = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
+      const injected = injectSeoIntoHtmlTemplate(distTemplate, seoPage, origin);
+      res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(injected);
     });
   }
 

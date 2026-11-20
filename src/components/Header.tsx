@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { History, Menu, X, Layers, CheckCircle2, Volume2, VolumeX } from 'lucide-react';
+import { useState, useEffect, MouseEvent } from 'react';
+import { History, Menu, X, Layers, CheckCircle2, Volume2, VolumeX, Globe2, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WukongBrandMark } from './WukongBrandMark';
 import {
@@ -13,6 +13,7 @@ interface HeaderProps {
   onOpenDiagnostics: () => void;
   onOpenBatch: () => void;
   onResetHome?: () => void;
+  onNavigate?: (path: string) => void;
   historyCount: number;
 }
 
@@ -21,6 +22,7 @@ export function Header({
   onOpenDiagnostics,
   onOpenBatch,
   onResetHome,
+  onNavigate,
   historyCount,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -42,16 +44,29 @@ export function Header({
     setSoundOn(next);
   };
 
+  const handleLinkNav = (e: MouseEvent, path: string) => {
+    if (onNavigate) {
+      e.preventDefault();
+      setMobileMenuOpen(false);
+      onNavigate(path);
+    }
+  };
+
   return (
     <header
       id="app-header"
-      className="sticky top-0 z-40 w-full border-b border-rose-300/15 bg-[#090409]/85 backdrop-blur-md"
+      className="sticky top-0 z-40 w-full border-b border-rose-300/20 bg-[#08030A]/70 backdrop-blur-xl"
     >
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-8">
+      <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-6">
         {/* Zone 1: Brand Wordmark */}
-        <button
-          type="button"
-          onClick={onResetHome}
+        <a
+          href="/"
+          onClick={(e) => {
+            if (onResetHome) {
+              e.preventDefault();
+              onResetHome();
+            }
+          }}
           className="flex items-center gap-2.5 sm:gap-3 whitespace-nowrap shrink-0 text-left group cursor-pointer min-h-[40px]"
         >
           <WukongBrandMark size="sm" animatedArrow />
@@ -59,28 +74,46 @@ export function Header({
             WuKong<span className="text-rose-400">-</span>
             <span className="text-pink-400">Vid</span>
           </span>
-        </button>
+        </a>
 
-        {/* Zone 2: Clean Text Navigation Links */}
+        {/* Zone 2: Clean Text Navigation Links with Crisp Icons */}
         <nav
-          aria-label="Primary utilities"
-          className="hidden md:flex items-center gap-8 text-sm font-medium text-rose-100/75"
+          aria-label="Primary navigation"
+          className="hidden md:flex items-center gap-6 text-sm font-medium text-rose-100/80"
         >
+          <a
+            href="/supported-platforms"
+            onClick={(e) => handleLinkNav(e, '/supported-platforms')}
+            className="flex items-center gap-1.5 whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-rose-400 after:transition-all"
+          >
+            <Globe2 className="w-4 h-4 text-rose-300" />
+            <span>Platforms</span>
+          </a>
+          <a
+            href="/mcp"
+            onClick={(e) => handleLinkNav(e, '/mcp')}
+            className="flex items-center gap-1.5 whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-pink-400 after:transition-all"
+          >
+            <Cpu className="w-4 h-4 text-pink-300" />
+            <span>MCP &amp; API</span>
+          </a>
           <button
             id="btn-batch-modal"
             type="button"
             onClick={onOpenBatch}
-            className="whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-rose-400 after:transition-all cursor-pointer"
+            className="flex items-center gap-1.5 whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-rose-400 after:transition-all cursor-pointer"
           >
-            Batch Queue
+            <Layers className="w-4 h-4 text-rose-400" />
+            <span>Batch Queue</span>
           </button>
           <button
             id="btn-diagnostics-modal"
             type="button"
             onClick={onOpenDiagnostics}
-            className="whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-rose-400 after:transition-all cursor-pointer"
+            className="flex items-center gap-1.5 whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-pink-400 after:transition-all cursor-pointer"
           >
-            Stream Check
+            <CheckCircle2 className="w-4 h-4 text-pink-400" />
+            <span>Stream Check</span>
           </button>
         </nav>
 
@@ -92,7 +125,7 @@ export function Header({
             onClick={handleToggleSound}
             title={soundOn ? 'Mute cutscene & extraction sound' : 'Unmute sound effects'}
             aria-label={soundOn ? 'Mute sound effects' : 'Enable sound effects'}
-            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 hover:border-pink-400/55 transition-colors cursor-pointer"
+            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#160815]/80 hover:bg-[#251023] text-white border border-rose-300/25 hover:border-pink-400/60 transition-colors cursor-pointer"
           >
             {soundOn ? (
               <Volume2 className="w-4 h-4 text-rose-400" />
@@ -138,6 +171,22 @@ export function Header({
             transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
             className="md:hidden border-t border-rose-300/15 bg-[#0D060C] px-4 py-3 space-y-1"
           >
+            <a
+              href="/supported-platforms"
+              onClick={(e) => handleLinkNav(e, '/supported-platforms')}
+              className="w-full flex items-center gap-3 px-3 min-h-[44px] rounded-lg text-sm font-medium text-white hover:bg-rose-500/10 transition-colors text-left"
+            >
+              <Globe2 className="w-4 h-4 text-rose-300 shrink-0" />
+              <span>Supported Platforms</span>
+            </a>
+            <a
+              href="/mcp"
+              onClick={(e) => handleLinkNav(e, '/mcp')}
+              className="w-full flex items-center gap-3 px-3 min-h-[44px] rounded-lg text-sm font-medium text-white hover:bg-rose-500/10 transition-colors text-left"
+            >
+              <Cpu className="w-4 h-4 text-pink-300 shrink-0" />
+              <span>MCP Server &amp; API</span>
+            </a>
             <button
               type="button"
               onClick={() => triggerMobileAction(onOpenBatch)}

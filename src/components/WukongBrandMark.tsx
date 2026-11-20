@@ -15,48 +15,62 @@ export function WukongBrandMark({
           box: 'w-20 h-20 sm:w-28 sm:h-28 rounded-2xl',
           badge: 'w-9 h-9 sm:w-10 sm:h-10 -right-2 -bottom-2 sm:-right-2.5 sm:-bottom-2.5 rounded-xl border-[3px]',
           arrow: 'w-4 h-4 sm:w-5 sm:h-5',
+          crownRing: 'p-[2px]',
         }
       : size === 'lg'
         ? {
             box: 'w-14 h-14 rounded-xl',
-            badge: 'w-6 h-6 -right-1.5 -bottom-1.5 rounded-md border-2',
+            badge: 'w-6 h-6 -right-1.5 -bottom-1.5 rounded-lg border-2',
             arrow: 'w-3.5 h-3.5',
+            crownRing: 'p-[1.5px]',
           }
         : size === 'md'
           ? {
               box: 'w-12 h-12 rounded-xl',
               badge: 'w-5 h-5 -right-1 -bottom-1 rounded-md border-2',
               arrow: 'w-3 h-3',
+              crownRing: 'p-[1.5px]',
             }
           : {
               box: 'w-9 h-9 rounded-lg',
               badge: 'w-4 h-4 -right-1 -bottom-1 rounded-[5px] border-2',
               arrow: 'w-2.5 h-2.5',
+              crownRing: 'p-[1px]',
             };
 
   return (
     <div className={`relative ${dims.box} shrink-0 select-none group`}>
-      {/* Sculpted Beveled Rose-Pink & Pearl-White Frame featuring the Monkey King Emblem */}
-      <div className="relative w-full h-full rounded-[inherit] bg-[#120711] border border-rose-300/45 ring-1 ring-inset ring-white/20 group-hover:border-white/75 transition-all overflow-hidden flex items-center justify-center shadow-lg shadow-rose-950/60">
-        <img
-          src="/monkey-king-icon.jpg"
-          alt="Sun Wukong emblem"
-          draggable={false}
-          className="w-full h-full object-cover object-center scale-[1.54] brightness-[1.07] contrast-[1.06]"
-        />
-        {/* Luminous subtle pearl inner edge blend */}
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-[inherit] shadow-[inset_0_0_14px_rgba(9,4,9,0.75)] ring-1 ring-inset ring-white/15"
-        />
+      {/* Soft Rose-Pink Moonlit Glow Halo */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute -inset-1 rounded-[inherit] bg-gradient-to-br from-rose-500/30 via-pink-500/20 to-white/15 blur-md opacity-70 group-hover:opacity-100 transition-opacity"
+      />
+
+      {/* Precision Beveled Rose-Pink & Pearl-White Metallic Frame */}
+      <div
+        className={`relative w-full h-full rounded-[inherit] bg-gradient-to-br from-rose-300/70 via-pink-400/50 to-white/60 ${dims.crownRing} shadow-lg shadow-rose-950/70 transition-all group-hover:from-white/85 group-hover:via-pink-300 group-hover:to-rose-400`}
+      >
+        <div className="relative w-full h-full rounded-[calc(inherit-2px)] bg-[#100612] overflow-hidden flex items-center justify-center">
+          <img
+            src="/monkey-king-icon.jpg"
+            alt="Sun Wukong emblem"
+            draggable={false}
+            className="w-full h-full object-cover object-center scale-[1.52] brightness-[1.1] contrast-[1.08]"
+          />
+          {/* Subtle Top Moonlight Specular Sheen & Rim Vignette */}
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/15 via-transparent to-[#09030B]/70 shadow-[inset_0_0_12px_rgba(8,3,10,0.85)]"
+          />
+        </div>
       </div>
 
-      {/* Precision Docked Rose-Pink Video Download Badge */}
+      {/* Sculpted Jewel-Tone Download Crest Badge */}
       {showDownloadBadge && (
         <span
           aria-hidden="true"
-          className={`absolute ${dims.badge} bg-gradient-to-br from-rose-500 to-pink-500 border-[#090409] flex items-center justify-center text-white shadow-md shadow-black/60 ring-1 ring-white/35 transition-transform duration-150 ${
-            animatedArrow ? 'group-hover:translate-y-0.5' : ''
+          className={`absolute ${dims.badge} bg-gradient-to-br from-rose-500 via-pink-500 to-rose-600 border-[#09030B] flex items-center justify-center text-white shadow-lg shadow-black/70 ring-1 ring-white/45 transition-transform duration-150 ${
+            animatedArrow ? 'group-hover:translate-y-0.5 group-hover:scale-105' : ''
           }`}
         >
           <svg
@@ -68,9 +82,9 @@ export function WukongBrandMark({
             strokeLinejoin="round"
             className={dims.arrow}
           >
-            <path d="M12 4.5v10.5" />
+            <path d="M12 4v11" />
             <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
-            <path d="M5 19.5h14" />
+            <path d="M4.5 19.5h15" />
           </svg>
         </span>
       )}

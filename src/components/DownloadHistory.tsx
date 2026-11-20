@@ -75,7 +75,7 @@ export function DownloadHistory({
   };
 
   const getPlatformIcon = (p: string) => {
-    return <PlatformIcon platform={p} className="w-4 h-4 shrink-0" />;
+    return <PlatformIcon platform={p} className="h-5 min-w-[26px] shrink-0" />;
   };
 
   const handleOpenItemPlayer = (item: DownloadHistoryItem) => {
@@ -295,7 +295,7 @@ export function DownloadHistory({
                         className="flex flex-col sm:flex-row sm:items-center justify-between px-4 py-3 hover:bg-rose-400/[0.04] transition-colors gap-3"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-8 h-8 rounded-lg bg-[#140A13] border border-rose-300/20 flex items-center justify-center shrink-0">
+                          <div className="flex items-center justify-center shrink-0">
                             {getPlatformIcon(item.platform)}
                           </div>
                           <div className="min-w-0">

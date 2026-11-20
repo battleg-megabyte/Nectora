@@ -36,41 +36,51 @@ function getAudioContext(): AudioContext | null {
   return audioCtx;
 }
 
-function attachGlobalAudioUnlocker(): void {
-  if (typeof window === 'undefined' || unlockListenersAttached) return;
-  unlockListenersAttached = true;
+function getSoundUrl(kind: SoundKind): string {
+  return kind === 'welcome' ? WELCOME_SOUND_URL : EXTRACTION_SOUND_URL;
+}
 
-  const unlock = () => {
-    const ctx = getAudioContext();
-    if (ctx && ctx.state === 'suspended') {
-      void ctx.resume().catch(() => {});
+function ensureAudio(kind: SoundKind, forceRecreate = false): HTMLAudioElement | null {
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
+  if (kind === 'welcome') {
+    if (!welcomeAudio || forceRecreate || welcomeAudio.error) {
+      welcomeAudio = new Audio(WELCOME_SOUND_URL);
+      welcomeAudio.preload = 'auto';
+      welcomeAudio.volume = 1.0;
+      welcomeAudio.muted = false;
+      welcomeAudio.setAttribute('playsinline', 'true');
+      welcomeAudio.setAttribute('webkit-playsinline', 'true');
     }
-    void loadSoundBuffer('welcome');
-    void loadSoundBuffer('extraction');
-  };
-
-  window.addEventListener('pointerdown', unlock, { passive: true, capture: true });
-  window.addEventListener('touchstart', unlock, { passive: true, capture: true });
-  window.addEventListener('keydown', unlock, { passive: true, capture: true });
+    return welcomeAudio;
+  }
+  if (!extractionAudio || forceRecreate || extractionAudio.error) {
+    extractionAudio = new Audio(EXTRACTION_SOUND_URL);
+    extractionAudio.preload = 'auto';
+    extractionAudio.volume = 1.0;
+    extractionAudio.muted = false;
+    extractionAudio.setAttribute('playsinline', 'true');
+    extractionAudio.setAttribute('webkit-playsinline', 'true');
+  }
+  return extractionAudio;
 }
 
 async function loadSoundBuffer(kind: SoundKind): Promise<AudioBuffer | null> {
   if (decodedBuffers[kind]) return decodedBuffers[kind]!;
   if (bufferLoads[kind]) return bufferLoads[kind]!;
 
-  const url = kind === 'welcome' ? WELCOME_SOUND_URL : EXTRACTION_SOUND_URL;
+  const url = getSoundUrl(kind);
   const ctx = getAudioContext();
   if (!ctx || typeof fetch !== 'function') return null;
 
   const loader = (async () => {
     try {
-      const res = await fetch(url, { cache: 'force-cache' });
+      const res = await fetch(url, { cache: 'no-cache' });
       if (!res.ok) return null;
       const contentType = (res.headers.get('content-type') || '').toLowerCase();
       if (contentType.includes('text/html')) return null;
       const arr = await res.arrayBuffer();
       if (arr.byteLength < 64) return null;
-      const decoded = await ctx.decodeAudioData(arr);
+      const decoded = await ctx.decodeAudioData(arr.slice(0));
       decodedBuffers[kind] = decoded;
       return decoded;
     } catch {
@@ -82,24 +92,28 @@ async function loadSoundBuffer(kind: SoundKind): Promise<AudioBuffer | null> {
   return loader;
 }
 
-function ensureAudio(kind: SoundKind): HTMLAudioElement | null {
-  if (typeof window === 'undefined' || typeof Audio === 'undefined') return null;
-  if (kind === 'welcome') {
-    if (!welcomeAudio) {
-      welcomeAudio = new Audio(WELCOME_SOUND_URL);
-      welcomeAudio.preload = 'auto';
-      welcomeAudio.volume = 0.9;
-      welcomeAudio.setAttribute('playsinline', 'true');
-    }
-    return welcomeAudio;
+export function unlockAudioEngine(): void {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === 'suspended') {
+    void ctx.resume().catch(() => {});
   }
-  if (!extractionAudio) {
-    extractionAudio = new Audio(EXTRACTION_SOUND_URL);
-    extractionAudio.preload = 'auto';
-    extractionAudio.volume = 0.9;
-    extractionAudio.setAttribute('playsinline', 'true');
-  }
-  return extractionAudio;
+  ensureAudio('welcome');
+  ensureAudio('extraction');
+  void loadSoundBuffer('welcome');
+  void loadSoundBuffer('extraction');
+}
+
+function attachGlobalAudioUnlocker(): void {
+  if (typeof window === 'undefined' || unlockListenersAttached) return;
+  unlockListenersAttached = true;
+
+  const unlock = () => {
+    unlockAudioEngine();
+  };
+
+  window.addEventListener('pointerdown', unlock, { passive: true, capture: true });
+  window.addEventListener('touchstart', unlock, { passive: true, capture: true });
+  window.addEventListener('keydown', unlock, { passive: true, capture: true });
 }
 
 function stopBufferPlayback(kind?: SoundKind): void {
@@ -112,92 +126,73 @@ function stopBufferPlayback(kind?: SoundKind): void {
   activeBufferSource = null;
 }
 
-function playSynthFallback(ctx: AudioContext, kind: SoundKind): boolean {
-  if (ctx.state !== 'running') return false;
-  try {
-    const now = ctx.currentTime;
-    const master = ctx.createGain();
-    master.gain.setValueAtTime(0.001, now);
-    master.gain.exponentialRampToValueAtTime(0.18, now + 0.04);
-    master.gain.exponentialRampToValueAtTime(0.0008, now + (kind === 'welcome' ? 1.1 : 0.45));
-    master.connect(ctx.destination);
-
-    const notes = kind === 'welcome' ? [261.63, 329.63, 392.0, 523.25] : [392.0, 523.25, 659.25];
-    notes.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now + idx * 0.07);
-      osc.connect(master);
-      osc.start(now + idx * 0.07);
-      osc.stop(now + idx * 0.07 + (kind === 'welcome' ? 0.75 : 0.3));
-    });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function playKind(kind: SoundKind): Promise<boolean> {
-  if (!soundEnabled) return false;
+function playKind(kind: SoundKind): Promise<boolean> {
+  if (!soundEnabled) return Promise.resolve(false);
   attachGlobalAudioUnlocker();
 
-  // Stop the opposite track cleanly
+  // Stop the opposite track cleanly so voices never overlap
   if (kind === 'welcome') {
     stopExtractionSound();
   } else {
     stopWelcomeSound();
   }
 
-  // Path 1: Web Audio API decoded buffer (rock-solid in iframes & desktop/mobile once unlocked)
+  // Trigger background unlock + buffer warm-up without awaiting indefinitely
   const ctx = getAudioContext();
-  if (ctx) {
-    if (ctx.state === 'suspended') {
+  if (ctx && ctx.state === 'suspended') {
+    void ctx.resume().catch(() => {});
+  }
+  void loadSoundBuffer(kind);
+
+  // Path 1: Zero-latency Web Audio playback when Context is already unlocked AND WAV is decoded
+  const readyBuffer = decodedBuffers[kind];
+  if (ctx && ctx.state === 'running' && readyBuffer) {
+    try {
+      stopBufferPlayback();
+      const source = ctx.createBufferSource();
+      source.buffer = readyBuffer;
+      const gain = ctx.createGain();
+      gain.gain.value = 1.0;
+      source.connect(gain);
+      gain.connect(ctx.destination);
+      source.onended = () => {
+        if (activeBufferSource?.node === source) {
+          activeBufferSource = null;
+        }
+      };
+      source.start(0);
+      activeBufferSource = { kind, node: source };
+      return Promise.resolve(true);
+    } catch {
+      // Fall through cleanly to HTMLAudioElement
+    }
+  }
+
+  // Path 2: Synchronous HTMLAudioElement.play() to preserve mobile/desktop user-gesture tokens
+  const audio = ensureAudio(kind);
+  if (!audio) return Promise.resolve(false);
+
+  try {
+    if (!audio.paused) {
+      audio.pause();
+    }
+    if (audio.readyState > 0) {
       try {
-        await ctx.resume();
+        audio.currentTime = 0;
       } catch {}
     }
-
-    if (ctx.state === 'running') {
-      const buffer = decodedBuffers[kind] || (await loadSoundBuffer(kind));
-      if (buffer) {
-        try {
-          stopBufferPlayback();
-          const source = ctx.createBufferSource();
-          source.buffer = buffer;
-          const gain = ctx.createGain();
-          gain.gain.value = 0.88;
-          source.connect(gain);
-          gain.connect(ctx.destination);
-          source.onended = () => {
-            if (activeBufferSource?.node === source) {
-              activeBufferSource = null;
-            }
-          };
-          source.start(0);
-          activeBufferSource = { kind, node: source };
-          return true;
-        } catch {}
-      }
+    audio.volume = 1.0;
+    audio.muted = false;
+    const playPromise = audio.play();
+    if (playPromise && typeof playPromise.then === 'function') {
+      return playPromise
+        .then(() => true)
+        .catch(() => false);
     }
+    return Promise.resolve(true);
+  } catch {
+    return Promise.resolve(false);
   }
-
-  // Path 2: HTMLAudioElement playback fallback
-  const audio = ensureAudio(kind);
-  if (audio) {
-    try {
-      audio.pause();
-      audio.currentTime = 0;
-      await audio.play();
-      return true;
-    } catch {}
-  }
-
-  // Path 3: Synthesized chime if AudioContext is running even when file decode isn't ready
-  if (ctx && ctx.state === 'running') {
-    return playSynthFallback(ctx, kind);
-  }
-
-  return false;
 }
 
 export function preloadSoundEffects(): void {
@@ -227,16 +222,13 @@ export function setSoundEnabled(next: boolean): boolean {
   if (!next) {
     stopAllSounds();
   } else {
-    const ctx = getAudioContext();
-    if (ctx && ctx.state === 'suspended') {
-      void ctx.resume().catch(() => {});
-    }
+    unlockAudioEngine();
   }
   listeners.forEach((cb) => cb(soundEnabled));
   return soundEnabled;
 }
 
-export async function playWelcomeSound(): Promise<boolean> {
+export function playWelcomeSound(): Promise<boolean> {
   return playKind('welcome');
 }
 
@@ -250,7 +242,7 @@ export function stopWelcomeSound(): void {
   }
 }
 
-export async function playExtractionSound(): Promise<boolean> {
+export function playExtractionSound(): Promise<boolean> {
   return playKind('extraction');
 }
 

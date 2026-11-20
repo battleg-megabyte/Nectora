@@ -1,64 +1,106 @@
+import { MouseEvent } from 'react';
 import { motion } from 'motion/react';
 import { PlatformIcon } from './PlatformIcon';
 
-export function PlatformChips() {
-  const platforms = [
-    {
-      id: 'tiktok',
-      name: 'TikTok',
-      detail: 'Watermark-free HD & MP3',
-    },
-    {
-      id: 'instagram',
-      name: 'Instagram',
-      detail: 'Reels, posts & audio',
-    },
-    {
-      id: 'facebook',
-      name: 'Facebook',
-      detail: 'Watch, reels & clips',
-    },
-    {
-      id: 'twitter',
-      name: 'X',
-      detail: 'High-bitrate MP4',
-    },
-    {
-      id: 'direct',
-      name: 'Direct & HLS',
-      detail: 'MP4, M3U8, Reddit, Vimeo',
-    },
-  ];
+interface PlatformChipsProps {
+  onNavigate?: (path: string) => void;
+}
+
+const PLATFORMS = [
+  {
+    id: 'tiktok',
+    name: 'TikTok',
+    path: '/tiktok-video-downloader',
+    textColor: 'text-[#8FFCF8] group-hover:text-white',
+    glowClass: 'group-hover:drop-shadow-[0_0_10px_rgba(37,244,238,0.65)]',
+  },
+  {
+    id: 'instagram',
+    name: 'Instagram',
+    path: '/instagram-reel-downloader',
+    textColor: 'text-pink-200 group-hover:text-white',
+    glowClass: 'group-hover:drop-shadow-[0_0_10px_rgba(236,72,153,0.7)]',
+  },
+  {
+    id: 'facebook',
+    name: 'Facebook',
+    path: '/facebook-video-downloader',
+    textColor: 'text-blue-200 group-hover:text-white',
+    glowClass: 'group-hover:drop-shadow-[0_0_10px_rgba(59,130,246,0.7)]',
+  },
+  {
+    id: 'x',
+    name: 'X',
+    path: '/supported-platforms',
+    textColor: 'text-white/90 group-hover:text-white',
+    glowClass: 'group-hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.55)]',
+  },
+  {
+    id: 'reddit',
+    name: 'Reddit',
+    path: '/supported-platforms',
+    textColor: 'text-orange-200 group-hover:text-white',
+    glowClass: 'group-hover:drop-shadow-[0_0_10px_rgba(255,87,0,0.65)]',
+  },
+  {
+    id: 'vimeo',
+    name: 'Vimeo',
+    path: '/supported-platforms',
+    textColor: 'text-sky-200 group-hover:text-white',
+    glowClass: 'group-hover:drop-shadow-[0_0_10px_rgba(26,183,234,0.65)]',
+  },
+  {
+    id: 'direct',
+    name: 'MP3 · HLS',
+    path: '/mp3-audio-extractor',
+    textColor: 'text-rose-200 group-hover:text-white',
+    glowClass: 'group-hover:drop-shadow-[0_0_10px_rgba(244,63,94,0.65)]',
+  },
+];
+
+export function PlatformChips({ onNavigate }: PlatformChipsProps) {
+  const handleLinkClick = (e: MouseEvent, path: string) => {
+    if (onNavigate) {
+      e.preventDefault();
+      onNavigate(path);
+    }
+  };
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 8 }}
+      initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, delay: 0.08, ease: [0.16, 1, 0.3, 1] }}
-      className="w-full max-w-3xl mx-auto mt-7 wk-box rounded-xl overflow-hidden"
+      transition={{ duration: 0.35, delay: 0.14, ease: [0.16, 1, 0.3, 1] }}
+      className="w-full max-w-3xl mx-auto mt-6"
     >
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 divide-y md:divide-y-0 md:divide-x divide-rose-300/15">
-        {platforms.map((p, idx) => {
-          const isLastOdd = idx === platforms.length - 1;
-          return (
-            <div
-              key={p.name}
-              className={`flex flex-col px-3.5 py-3 hover:bg-rose-400/[0.05] transition-colors ${
-                isLastOdd ? 'col-span-2 sm:col-span-1' : ''
-              }`}
+      <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3 sm:gap-x-7">
+        {PLATFORMS.map((p, idx) => (
+          <motion.a
+            key={p.name}
+            href={p.path}
+            onClick={(e) => handleLinkClick(e, p.path)}
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{
+              duration: 0.28,
+              delay: 0.15 + idx * 0.035,
+              ease: [0.16, 1, 0.3, 1],
+            }}
+            whileHover={{ y: -2, scale: 1.04 }}
+            whileTap={{ scale: 0.96 }}
+            className="group inline-flex items-center gap-2 py-1.5 px-1 transition-all duration-200"
+          >
+            <PlatformIcon
+              platform={p.id}
+              className={`w-5 h-5 shrink-0 transition-all duration-200 group-hover:scale-110 ${p.glowClass}`}
+            />
+            <span
+              className={`font-display text-xs sm:text-[13px] font-semibold tracking-tight whitespace-nowrap transition-colors ${p.textColor}`}
             >
-              <div className="flex items-center gap-2">
-                <PlatformIcon platform={p.id} className="w-3.5 h-3.5 shrink-0" />
-                <span className="text-xs font-semibold text-white truncate">
-                  {p.name}
-                </span>
-              </div>
-              <span className="text-[11px] text-rose-100/60 mt-0.5 truncate">
-                {p.detail}
-              </span>
-            </div>
-          );
-        })}
+              {p.name}
+            </span>
+          </motion.a>
+        ))}
       </div>
     </motion.div>
   );
