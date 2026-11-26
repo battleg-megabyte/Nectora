@@ -1,5 +1,4 @@
 import { MouseEvent } from 'react';
-import { motion } from 'motion/react';
 import { PlatformIcon } from './PlatformIcon';
 
 interface PlatformChipsProps {
@@ -67,28 +66,14 @@ export function PlatformChips({ onNavigate }: PlatformChipsProps) {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35, delay: 0.14, ease: [0.16, 1, 0.3, 1] }}
-      className="w-full max-w-3xl mx-auto mt-6"
-    >
+    <div className="wk-slide-up w-full max-w-3xl mx-auto mt-6">
       <div className="flex flex-wrap items-center justify-center gap-x-5 gap-y-3 sm:gap-x-7">
-        {PLATFORMS.map((p, idx) => (
-          <motion.a
+        {PLATFORMS.map((p) => (
+          <a
             key={p.name}
             href={p.path}
             onClick={(e) => handleLinkClick(e, p.path)}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{
-              duration: 0.28,
-              delay: 0.15 + idx * 0.035,
-              ease: [0.16, 1, 0.3, 1],
-            }}
-            whileHover={{ y: -2, scale: 1.04 }}
-            whileTap={{ scale: 0.96 }}
-            className="group inline-flex items-center gap-2 py-1.5 px-1 transition-all duration-200"
+            className="group inline-flex items-center gap-2 py-1.5 px-1 transition-transform duration-200 hover:-translate-y-0.5 active:scale-95"
           >
             <PlatformIcon
               platform={p.id}
@@ -99,9 +84,9 @@ export function PlatformChips({ onNavigate }: PlatformChipsProps) {
             >
               {p.name}
             </span>
-          </motion.a>
+          </a>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 }

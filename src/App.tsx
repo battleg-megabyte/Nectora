@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react';
-import { MotionConfig, motion, AnimatePresence } from 'motion/react';
 import { Header } from './components/Header';
 import { PlatformChips } from './components/PlatformChips';
 import { UrlInputBar } from './components/UrlInputBar';
@@ -87,7 +86,7 @@ export default function App() {
     try {
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       await navigator.clipboard.writeText(
-        `MCP JSON-RPC: ${origin}/mcp (protocol 2024-11-05, no auth)\nManifest: ${origin}/.well-known/mcp.json\n1-step stream: ${origin}/api/quick-download?url=VIDEO_URL&quality=1080p`
+        `MCP JSON-RPC: ${origin}/mcp (Streamable HTTP 2025-03-26, v1.4.0, no auth)\nManifest: ${origin}/.well-known/mcp.json\n1-step stream: ${origin}/api/quick-download?url=VIDEO_URL&quality=1080p`
       );
       setMcpCopiedHero(true);
       setTimeout(() => setMcpCopiedHero(false), 2000);
@@ -267,8 +266,7 @@ export default function App() {
   };
 
   return (
-    <MotionConfig reducedMotion="user">
-      <div className="relative min-h-[100dvh] studio-canvas text-white flex flex-col justify-between overflow-x-hidden">
+    <div className="relative min-h-[100dvh] studio-canvas text-white flex flex-col justify-between overflow-x-hidden">
         {/* Responsive GPU-Accelerated Moonlit Horizon Backdrop + Flanking Celestial Birds */}
         <div
           aria-hidden="true"
@@ -338,59 +336,38 @@ export default function App() {
 
         {/* Main Workspace */}
         <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-7 sm:py-12 flex flex-col items-center">
-          <AnimatePresence mode="wait">
-            {activeSeoPage ? (
-              <motion.div
-                key={`seo-${activeSeoPage.path}`}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.18 }}
-                className="w-full"
+          {activeSeoPage ? (
+            <div key={`seo-${activeSeoPage.path}`} className="wk-fade-in w-full">
+              <Suspense
+                fallback={
+                  <div className="w-full max-w-4xl mx-auto py-16 text-center text-xs text-rose-200/70">
+                    Loading guide...
+                  </div>
+                }
               >
-                <Suspense
-                  fallback={
-                    <div className="w-full max-w-4xl mx-auto py-16 text-center text-xs text-rose-200/70">
-                      Loading guide...
-                    </div>
-                  }
-                >
-                  <SeoPageView
-                    pagePath={activeSeoPage.path}
-                    onNavigate={handleNavigate}
-                    onOpenMcpModal={() => setMcpOpen(true)}
-                    onOpenBatchModal={() => setBatchOpen(true)}
-                    onOpenDiagnosticsModal={() => setDiagnosticsOpen(true)}
-                  />
-                </Suspense>
-              </motion.div>
-            ) : (
-              <motion.div
-                key="home-live-view"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.18 }}
-                className="w-full flex flex-col items-center"
-              >
-                {/* Focused Editorial Hero (Emblem, H1, Paste Box, Chips) */}
-                <motion.div
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                  className="relative text-center max-w-3xl mx-auto flex flex-col items-center space-y-3 mb-6 sm:mb-7"
-                >
-                  <div className="flex flex-col items-center gap-1.5">
-                    <motion.button
-                      type="button"
-                      whileHover={{ scale: 1.07, rotate: 1.5 }}
-                      whileTap={{ scale: 0.95 }}
-                      transition={{ type: 'spring', stiffness: 420, damping: 24 }}
-                      onClick={() => setShowSplash(true)}
-                      title="Replay opening animation"
-                      aria-label="WuKong-Vid emblem — replay intro animation"
-                      className="group relative p-1 rounded-full cursor-pointer drop-shadow-[0_0_26px_rgba(244,63,94,0.45)] animate-float-slow"
-                    >
-                      <WukongBrandMark size="md" animatedArrow />
-                    </motion.button>
+                <SeoPageView
+                  pagePath={activeSeoPage.path}
+                  onNavigate={handleNavigate}
+                  onOpenMcpModal={() => setMcpOpen(true)}
+                  onOpenBatchModal={() => setBatchOpen(true)}
+                  onOpenDiagnosticsModal={() => setDiagnosticsOpen(true)}
+                />
+              </Suspense>
+            </div>
+          ) : (
+            <div key="home-live-view" className="wk-fade-in w-full flex flex-col items-center">
+              {/* Focused Editorial Hero (Emblem, H1, Paste Box, Chips) */}
+              <div className="wk-slide-up relative text-center max-w-3xl mx-auto flex flex-col items-center space-y-3 mb-6 sm:mb-7">
+                <div className="flex flex-col items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setShowSplash(true)}
+                    title="Replay opening animation"
+                    aria-label="WuKong-Vid emblem — replay intro animation"
+                    className="group relative p-1 rounded-full cursor-pointer drop-shadow-[0_0_26px_rgba(244,63,94,0.45)] animate-float-slow transition-transform duration-200 hover:scale-[1.07] hover:rotate-[1.5deg] active:scale-95"
+                  >
+                    <WukongBrandMark size="md" animatedArrow />
+                  </button>
 
                     <div className="flex items-baseline justify-center gap-1.5">
                       <span className="text-[11px] font-medium tracking-wide text-white/90 drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]">
@@ -411,7 +388,7 @@ export default function App() {
                       MP4, MP3, and M4A
                     </span>
                   </h1>
-                </motion.div>
+                </div>
 
                 {/* Responsive Lunar Pill Command Input */}
                 <UrlInputBar
@@ -426,55 +403,48 @@ export default function App() {
                 <PlatformChips onNavigate={handleNavigate} />
 
                 {/* Live Extraction Skeleton & Result States */}
-                <AnimatePresence mode="wait">
-                  {status === 'analyzing' && (
-                    <MediaExtractionSkeleton
-                      stageIndex={extractionStep}
-                      stages={EXTRACTION_STAGES}
-                      onStop={handleAbortExtraction}
-                    />
-                  )}
+                {status === 'analyzing' && (
+                  <MediaExtractionSkeleton
+                    stageIndex={extractionStep}
+                    stages={EXTRACTION_STAGES}
+                    onStop={handleAbortExtraction}
+                  />
+                )}
 
-                  {status === 'error' && errorMessage && (
-                    <motion.div
-                      key="error"
-                      role="alert"
-                      initial={{ opacity: 0, y: 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.18 }}
-                      className="w-full max-w-3xl mx-auto mt-8 px-2 py-3.5 border-t border-b border-red-400/35 text-red-100 flex items-center gap-3"
-                    >
-                      <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-                      <div className="text-xs sm:text-sm min-w-0">
-                        <span className="font-semibold text-red-100">Unable to extract media — </span>
-                        <span className="text-red-200/90">{errorMessage}</span>
-                      </div>
-                    </motion.div>
-                  )}
-
-                  {status === 'found' && media && (
-                    <div key={media.id} className="w-full">
-                      <Suspense
-                        fallback={
-                          <MediaExtractionSkeleton
-                            stageIndex={2}
-                            stages={EXTRACTION_STAGES}
-                            onStop={handleAbortExtraction}
-                          />
-                        }
-                      >
-                        <MediaResultCard
-                          media={media}
-                          preferredResolution={selectedQualityChip}
-                          onSaveHistory={handleSaveHistory}
-                          onOpenAiAnalysis={() => setAiPanelOpen(true)}
-                          onRegisterBlob={handleRegisterBlob}
-                        />
-                      </Suspense>
+                {status === 'error' && errorMessage && (
+                  <div
+                    role="alert"
+                    className="wk-slide-up w-full max-w-3xl mx-auto mt-8 px-2 py-3.5 border-t border-b border-red-400/35 text-red-100 flex items-center gap-3"
+                  >
+                    <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                    <div className="text-xs sm:text-sm min-w-0">
+                      <span className="font-semibold text-red-100">Unable to extract media — </span>
+                      <span className="text-red-200/90">{errorMessage}</span>
                     </div>
-                  )}
-                </AnimatePresence>
+                  </div>
+                )}
+
+                {status === 'found' && media && (
+                  <div key={media.id} className="w-full">
+                    <Suspense
+                      fallback={
+                        <MediaExtractionSkeleton
+                          stageIndex={2}
+                          stages={EXTRACTION_STAGES}
+                          onStop={handleAbortExtraction}
+                        />
+                      }
+                    >
+                      <MediaResultCard
+                        media={media}
+                        preferredResolution={selectedQualityChip}
+                        onSaveHistory={handleSaveHistory}
+                        onOpenAiAnalysis={() => setAiPanelOpen(true)}
+                        onRegisterBlob={handleRegisterBlob}
+                      />
+                    </Suspense>
+                  </div>
+                )}
 
                 {/* Open Hairline Recent Downloads Strip when idle (No Box Cards) */}
                 {status === 'idle' && history.length > 0 && (
@@ -646,9 +616,8 @@ export default function App() {
                     <ArrowUpRight className="w-3 h-3" />
                   </button>
                 </nav>
-              </motion.div>
+              </div>
             )}
-          </AnimatePresence>
         </main>
 
         {/* Footer */}
@@ -709,6 +678,5 @@ export default function App() {
           )}
         </Suspense>
       </div>
-    </MotionConfig>
   );
 }

@@ -1,4 +1,3 @@
-import { motion } from 'motion/react';
 import { Loader2, Square, CheckCircle2 } from 'lucide-react';
 
 interface WebsitePageSkeletonProps {
@@ -8,16 +7,11 @@ interface WebsitePageSkeletonProps {
 export function WebsitePageSkeleton({ variant = 'home' }: WebsitePageSkeletonProps) {
   if (variant === 'seo') {
     return (
-      <motion.div
-        key="website-skeleton-seo"
-        initial={{ opacity: 0.7 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.18 }}
+      <div
         role="status"
         aria-busy="true"
         aria-label="Loading page content"
-        className="w-full max-w-4xl mx-auto space-y-8"
+        className="wk-fade-in w-full max-w-4xl mx-auto space-y-8"
       >
         <div className="flex items-center gap-2">
           <div className="h-3.5 w-24 rounded-full wk-skeleton" />
@@ -48,21 +42,16 @@ export function WebsitePageSkeleton({ variant = 'home' }: WebsitePageSkeletonPro
             </div>
           ))}
         </div>
-      </motion.div>
+      </div>
     );
   }
 
   return (
-    <motion.div
-      key="website-skeleton-home"
-      initial={{ opacity: 0.75 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.2 }}
+    <div
       role="status"
       aria-busy="true"
       aria-label="Loading WuKong Vid website"
-      className="w-full flex flex-col items-center"
+      className="wk-fade-in w-full flex flex-col items-center"
     >
       {/* Open Hero Skeleton */}
       <div className="max-w-3xl w-full mx-auto flex flex-col items-center space-y-3.5 mb-6 sm:mb-7">
@@ -139,7 +128,7 @@ export function WebsitePageSkeleton({ variant = 'home' }: WebsitePageSkeletonPro
           </div>
         ))}
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -157,16 +146,11 @@ export function MediaExtractionSkeleton({
   const currentStage = stages[stageIndex] || stages[0];
 
   return (
-    <motion.div
-      key="extraction-skeleton"
-      initial={{ opacity: 0, y: 12 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+    <div
       role="status"
       aria-busy="true"
       aria-label="Extracting media streams"
-      className="w-full max-w-4xl mx-auto mt-10 pt-6 border-t border-rose-300/20 wk-open-stage rounded-t-[36px] px-4 sm:px-8 pb-8"
+      className="wk-slide-up w-full max-w-4xl mx-auto mt-10 pt-6 border-t border-rose-300/20 wk-open-stage rounded-t-[36px] px-4 sm:px-8 pb-8"
     >
       {/* Open Extraction Status Bar */}
       <div className="pb-4 border-b border-rose-300/15 flex items-center justify-between gap-3">
@@ -268,6 +252,6 @@ export function MediaExtractionSkeleton({
           </div>
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

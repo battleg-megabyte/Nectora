@@ -1,6 +1,5 @@
 import { useState, MouseEvent } from 'react';
 import { History, Menu, X, Layers, Music, Globe2, Code2 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { WukongBrandMark } from './WukongBrandMark';
 
 interface HeaderProps {
@@ -129,50 +128,42 @@ export function Header({
       </div>
 
       {/* Mobile Slide-Down Drawer Menu */}
-      <AnimatePresence>
-        {mobileMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -6 }}
-            transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
-            className="md:hidden border-t border-rose-300/15 bg-[#09030D]/95 backdrop-blur-xl px-4 py-3 space-y-1"
+      {mobileMenuOpen && (
+        <div className="wk-dropdown-in md:hidden border-t border-rose-300/15 bg-[#09030D]/95 backdrop-blur-xl px-4 py-3 space-y-1">
+          <a
+            href="/supported-platforms"
+            onClick={(e) => handleLinkNav(e, '/supported-platforms')}
+            className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
           >
-            <a
-              href="/supported-platforms"
-              onClick={(e) => handleLinkNav(e, '/supported-platforms')}
-              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
-            >
-              <Globe2 className="w-4 h-4 text-rose-300 shrink-0" />
-              <span>Supported Platforms</span>
-            </a>
-            <a
-              href="/mp3-audio-extractor"
-              onClick={(e) => handleLinkNav(e, '/mp3-audio-extractor')}
-              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
-            >
-              <Music className="w-4 h-4 text-pink-300 shrink-0" />
-              <span>MP3 Audio Extractor</span>
-            </a>
-            <button
-              type="button"
-              onClick={() => triggerMobileAction(onOpenBatch)}
-              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left cursor-pointer"
-            >
-              <Layers className="w-4 h-4 text-rose-400 shrink-0" />
-              <span>Batch Queue</span>
-            </button>
-            <a
-              href="/mcp"
-              onClick={(e) => handleLinkNav(e, '/mcp')}
-              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
-            >
-              <Code2 className="w-4 h-4 text-pink-400 shrink-0" />
-              <span>Developers</span>
-            </a>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <Globe2 className="w-4 h-4 text-rose-300 shrink-0" />
+            <span>Supported Platforms</span>
+          </a>
+          <a
+            href="/mp3-audio-extractor"
+            onClick={(e) => handleLinkNav(e, '/mp3-audio-extractor')}
+            className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
+          >
+            <Music className="w-4 h-4 text-pink-300 shrink-0" />
+            <span>MP3 Audio Extractor</span>
+          </a>
+          <button
+            type="button"
+            onClick={() => triggerMobileAction(onOpenBatch)}
+            className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left cursor-pointer"
+          >
+            <Layers className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>Batch Queue</span>
+          </button>
+          <a
+            href="/mcp"
+            onClick={(e) => handleLinkNav(e, '/mcp')}
+            className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
+          >
+            <Code2 className="w-4 h-4 text-pink-400 shrink-0" />
+            <span>Developers</span>
+          </a>
+        </div>
+      )}
     </header>
   );
 }

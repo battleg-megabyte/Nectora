@@ -1286,17 +1286,31 @@ async function startServer() {
         upstreamHeaders['Range'] = req.headers.range;
       }
 
-      const { response: remoteRes } = await safeFetch(mediaUrl, {
+      let { response: remoteRes } = await safeFetch(mediaUrl, {
         headers: upstreamHeaders,
       });
 
+      if (remoteRes.status === 401 || remoteRes.status === 403) {
+        await remoteRes.body?.cancel().catch(() => {});
+        const retryResult = await safeFetch(mediaUrl, {
+          headers: {
+            'User-Agent': upstreamHeaders['User-Agent'],
+            Accept: '*/*',
+            ...(req.headers.range ? { Range: req.headers.range } : {}),
+          },
+        });
+        remoteRes = retryResult.response;
+      }
+
       if (!remoteRes.ok && remoteRes.status !== 206) {
+        await remoteRes.body?.cancel().catch(() => {});
         res.status(remoteRes.status).send('Upstream media stream unavailable');
         return;
       }
 
       const rawType = (remoteRes.headers.get('content-type') || '').toLowerCase();
       if (rawType.includes('mpegurl') || rawType.includes('m3u8')) {
+        await remoteRes.body?.cancel().catch(() => {});
         spawnHlsToMp4Remux(mediaUrl, res, req, parsedMediaUrl, clientCookies);
         return;
       }
@@ -1779,12 +1793,14 @@ async function startServer() {
       }
 
       if (!remoteRes.ok) {
+        await remoteRes.body?.cancel().catch(() => {});
         res.status(remoteRes.status).json({ error: `Upstream source returned HTTP ${remoteRes.status}. The media stream may have expired.` });
         return;
       }
 
       const upstreamContentType = (remoteRes.headers.get('content-type') || '').toLowerCase();
       if (upstreamContentType.includes('mpegurl') || upstreamContentType.includes('m3u8')) {
+        await remoteRes.body?.cancel().catch(() => {});
         spawnHlsToMp4Remux(
           mediaUrl,
           res,
@@ -1798,6 +1814,7 @@ async function startServer() {
       }
 
       if (upstreamContentType.includes('text/html') || upstreamContentType.includes('text/plain') || upstreamContentType.includes('application/json')) {
+        await remoteRes.body?.cancel().catch(() => {});
         res.status(403).json({ error: 'Upstream platform returned an HTML web page instead of media stream. Please verify the video is public or re-analyze.' });
         return;
       }
@@ -2690,13 +2707,13 @@ async function startServer() {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
+    const cachedDistTemplate = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
     app.use(express.static(distPath, { index: false }));
     app.get('*', (req: Request, res: Response) => {
       const origin = resolvePublicOrigin(req);
       const normPath = normalizeSeoPath(req.path);
       const seoPage = getSeoPageByPath(normPath) ?? null;
-      const distTemplate = fs.readFileSync(path.join(distPath, 'index.html'), 'utf-8');
-      const injected = injectSeoIntoHtmlTemplate(distTemplate, seoPage, origin);
+      const injected = injectSeoIntoHtmlTemplate(cachedDistTemplate, seoPage, origin);
       res.status(200).set({ 'Content-Type': 'text/html; charset=utf-8' }).end(injected);
     });
   }

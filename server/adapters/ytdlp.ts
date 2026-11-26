@@ -29,7 +29,7 @@ export function extractWithYtDlp(
 ): Promise<AdapterResult> {
   return new Promise((resolve) => {
     const ytDlpBin = getYtDlpPath();
-    const activeCookies = cookies || getPlatformSecurityCookies(platformHint || 'direct');
+    const activeCookies = getPlatformSecurityCookies(platformHint || 'direct', cookies);
 
     const args = [
       '-j',
@@ -49,7 +49,7 @@ export function extractWithYtDlp(
       args.push('--add-header', `Cookie: ${activeCookies}`);
     }
 
-    args.push(url);
+    args.push('--', url);
 
     execFile(
       ytDlpBin,

@@ -292,14 +292,14 @@ export const SEO_PAGES: SeoPageConfig[] = [
     category: 'developer',
     title: 'MCP Server for AI Agents & Media Extraction | WuKong Vid',
     description:
-      'Connect Claude, Cursor, Windsurf, or custom AI agents to the WuKong Vid Model Context Protocol (MCP) server at /mcp with 5 live media extraction tools.',
+      'Connect Claude, Cursor, Windsurf, or custom AI agents to the WuKong Vid Model Context Protocol (MCP) server at /mcp with 7 live media extraction tools.',
     h1: 'MCP Server for AI Agents & Public Media Extraction',
     h2: 'Streamable HTTP Model Context Protocol Endpoint with OpenAPI Discovery',
     intro:
-      'WuKong Vid exposes a public, zero-auth Model Context Protocol (MCP) server at /mcp (and /api/mcp) supporting Streamable HTTP, JSON-RPC 2.0, and Server-Sent Events. AI assistants can discover platform capabilities, extract MP4/MP3/M4A stream links, process up to 10 URLs in batch, and verify live download streams.',
+      'WuKong Vid exposes a public, zero-auth Model Context Protocol (MCP) server at /mcp (and /api/mcp) supporting Streamable HTTP, JSON-RPC 2.0, and Server-Sent Events. AI assistants can inspect URLs, discover platform capabilities, extract MP4/MP3/M4A stream links, pull 320kbps MP3 audio directly, process up to 10 URLs in batch, and verify live download streams.',
     badgeText: 'Model Context Protocol',
     schemaType: 'TechArticle',
-    lastmod: '2026-11-20',
+    lastmod: '2026-11-26',
     priority: '0.95',
     changefreq: 'weekly',
     sections: [
@@ -320,22 +320,24 @@ export const SEO_PAGES: SeoPageConfig[] = [
         },
       },
       {
-        heading: 'All 5 Live MCP Tools',
+        heading: 'All 7 Live MCP Tools',
         paragraphs: [
-          'Every tool returns structured JSON alongside human-readable text output so reasoning models can pass ready-to-download links straight to users or downstream automation steps.',
+          'Every tool returns structured JSON alongside compact text output and supports field projection (fields / compact) so reasoning models can pass ready-to-download links straight to users or downstream automation steps.',
         ],
         bullets: [
           'list_capabilities — Lists supported platforms, excluded platforms (YouTube), video/audio presets, and discovery links',
-          'extract_media_streams — Resolves metadata, flat quickLinks (mp4_1080p..mp4_360p, mp3_320k..mp3_128k, oneStep), and optional inline verify_ready probe in a single compact JSON call',
+          'inspect_url_platform — Fast local URL classifier checking platform support, exclusions, and recommended tool call before extraction',
+          'extract_media_streams — Resolves metadata, flat quickLinks (mp4_1080p..mp4_360p, mp3_320k..mp3_128k, oneStep), and optional verify_ready probe in a single call',
+          'extract_audio_mp3 — Dedicated fast-path tool returning verified 320k/192k/128k MP3 and 256k M4A AAC download links',
           'build_download_url — Constructs validated /api/download and /api/proxy-media URLs for custom format, bitrate, and scale_height parameters',
           'batch_extract_media — Concurrently resolves up to 10 public media URLs in a single tool call',
           'verify_download_stream — Probes an extracted /api/download stream to confirm valid playable media bytes before delivery',
         ],
       },
       {
-        heading: 'MCP Resources, Prompts & Machine-Readable Specs',
+        heading: 'MCP Resources, Templates, Prompts & Machine-Readable Specs',
         paragraphs: [
-          'In addition to tools, the MCP server exposes three resources (wukong://guide/agent-quickstart, wukong://capabilities/platforms, wukong://schema/openapi) and two workflow prompts (extract_media_workflow, batch_extract_workflow).',
+          'In addition to tools, the MCP server exposes three static resources (wukong://guide/agent-quickstart, wukong://capabilities/platforms, wukong://schema/openapi), a dynamic resource template (wukong://extract/{url}), and three workflow prompts (extract_media_workflow, extract_audio_workflow, batch_extract_workflow).',
           'Full OpenAPI 3.1 schema is published at /openapi.json, along with /llms.txt, /llms-full.txt, /.well-known/mcp.json, and /.well-known/agent.json.',
         ],
         codeBlock: {

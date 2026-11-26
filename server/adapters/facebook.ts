@@ -771,7 +771,6 @@ export class FacebookAdapter implements PlatformAdapter {
       }
 
       // Method C: Parallel Facebook Desktop + Mobile + Crawler + Plugin Embed Scrape
-      let dynamicCookies = activeCookies;
       const htmlCandidates: Array<{ candidateUrl: string; ua: string }> = [
         {
           candidateUrl: targetUrl,
@@ -804,17 +803,9 @@ export class FacebookAdapter implements PlatformAdapter {
             Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Sec-Fetch-Mode': 'navigate',
             'Sec-Fetch-Site': 'none',
-            ...(dynamicCookies ? { Cookie: dynamicCookies } : {}),
+            ...(activeCookies ? { Cookie: activeCookies } : {}),
           },
         });
-
-        const setCookies = response.headers.get('set-cookie');
-        if (setCookies) {
-          dynamicCookies = `${dynamicCookies}; ${setCookies
-            .split(',')
-            .map((c) => c.split(';')[0].trim())
-            .join('; ')}`;
-        }
 
         if (!response.ok) {
           await response.body?.cancel().catch(() => {});
@@ -1095,11 +1086,13 @@ export class FacebookAdapter implements PlatformAdapter {
             'User-Agent':
               'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
             Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            ...(dynamicCookies ? { Cookie: dynamicCookies } : {}),
+            ...(activeCookies ? { Cookie: activeCookies } : {}),
           },
         });
 
-        if (mResponse.ok) {
+        if (!mResponse.ok) {
+          await mResponse.body?.cancel().catch(() => {});
+        } else {
           const mHtml = await mResponse.text();
           const redirectMatch = mHtml.match(/\/video_redirect\/\?src=([^"&]+)/i);
           let mVideoUrl: string | null = null;

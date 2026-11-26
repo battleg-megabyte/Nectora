@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, ChangeEvent, FormEvent } from 'react';
 import { Link2, Clipboard, X, Loader2, ArrowRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
 import { PlatformType } from '../types';
 import { PlatformIcon } from './PlatformIcon';
 
@@ -164,33 +163,18 @@ export function UrlInputBar({
       direct: 'Direct',
     };
 
-    return (
-      <AnimatePresence mode="popLayout" initial={false}>
-        {detectedPlatform === 'unsupported' ? (
-          <motion.span
-            key="generic-link"
-            initial={{ opacity: 0, scale: 0.85 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.85 }}
-            transition={{ duration: 0.14 }}
-            className="flex items-center"
-          >
-            <Link2 className="w-4 h-4 text-rose-200/70 shrink-0" />
-          </motion.span>
-        ) : (
-          <motion.span
-            key={detectedPlatform}
-            initial={{ opacity: 0, y: 4, scale: 0.92 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.92 }}
-            transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-            className="flex items-center gap-1.5 text-xs font-medium text-slate-100"
-          >
-            <PlatformIcon platform={detectedPlatform} className="h-5 min-w-[24px] shrink-0" />
-            <span className="hidden sm:inline">{labelMap[detectedPlatform] || 'Stream'}</span>
-          </motion.span>
-        )}
-      </AnimatePresence>
+    return detectedPlatform === 'unsupported' ? (
+      <span className="wk-fade-in flex items-center">
+        <Link2 className="w-4 h-4 text-rose-200/70 shrink-0" />
+      </span>
+    ) : (
+      <span
+        key={detectedPlatform}
+        className="wk-fade-in flex items-center gap-1.5 text-xs font-medium text-slate-100"
+      >
+        <PlatformIcon platform={detectedPlatform} className="h-5 min-w-[24px] shrink-0" />
+        <span className="hidden sm:inline">{labelMap[detectedPlatform] || 'Stream'}</span>
+      </span>
     );
   };
 
@@ -219,12 +203,7 @@ export function UrlInputBar({
   ];
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-      className="w-full max-w-3xl mx-auto"
-    >
+    <div className="wk-slide-up w-full max-w-3xl mx-auto">
       {/* Fluid Lunar Capsule Input (No Square/Rectangular Corners) */}
       <form onSubmit={handleSubmit} className="relative">
         <div className="wk-lunar-bar flex flex-col sm:flex-row sm:items-center rounded-[30px] sm:rounded-full focus-within:border-rose-300/75 focus-within:ring-2 focus-within:ring-rose-400/25 transition-all p-2 sm:p-1.5 sm:pl-3 gap-2">
@@ -272,13 +251,11 @@ export function UrlInputBar({
             )}
           </div>
 
-          <motion.button
+          <button
             id="btn-submit-analyze"
             type="submit"
             disabled={!url.trim() || isLoading}
-            whileHover={{ scale: 1.015 }}
-            whileTap={{ scale: 0.98 }}
-            className="wk-sheen-hover relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2 px-6 min-h-[46px] sm:min-h-[46px] rounded-full font-semibold text-sm bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 disabled:opacity-40 disabled:cursor-not-allowed transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-lg shadow-rose-950/60 after:content-[''] after:pointer-events-none after:absolute after:inset-y-0 after:w-1/3 after:-translate-x-[150%] after:bg-gradient-to-r after:from-transparent after:via-white/30 after:to-transparent"
+            className="wk-sheen-hover relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2 px-6 min-h-[46px] sm:min-h-[46px] rounded-full font-semibold text-sm bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 hover:scale-[1.015] active:scale-[0.98] text-white border border-white/25 disabled:opacity-40 disabled:cursor-not-allowed transition-all whitespace-nowrap shrink-0 cursor-pointer shadow-lg shadow-rose-950/60 after:content-[''] after:pointer-events-none after:absolute after:inset-y-0 after:w-1/3 after:-translate-x-[150%] after:bg-gradient-to-r after:from-transparent after:via-white/30 after:to-transparent"
           >
             {isLoading ? (
               <>
@@ -291,7 +268,7 @@ export function UrlInputBar({
                 <ArrowRight className="w-4 h-4" />
               </>
             )}
-          </motion.button>
+          </button>
         </div>
       </form>
 
@@ -322,11 +299,7 @@ export function UrlInputBar({
                   {q.tag}
                 </span>
                 {active && (
-                  <motion.span
-                    layoutId="quality-underline"
-                    transition={{ type: 'spring', stiffness: 460, damping: 34 }}
-                    className="absolute inset-x-0 -bottom-[5px] h-0.5 bg-gradient-to-r from-rose-400 to-pink-400 rounded-full"
-                  />
+                  <span className="wk-fade-in absolute inset-x-0 -bottom-[5px] h-0.5 bg-gradient-to-r from-rose-400 to-pink-400 rounded-full" />
                 )}
               </button>
             );
@@ -358,6 +331,6 @@ export function UrlInputBar({
           ))}
         </div>
       </div>
-    </motion.div>
+    </div>
   );
 }

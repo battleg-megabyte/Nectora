@@ -56,6 +56,24 @@ export function BatchDownloadModal({
     format: 'mp3' | 'm4a' | 'mp4';
   } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const createdBlobsRef = useRef<string[]>([]);
+
+  const revokeBatchBlobs = () => {
+    for (const url of createdBlobsRef.current) {
+      try {
+        window.URL.revokeObjectURL(url);
+      } catch {}
+    }
+    createdBlobsRef.current = [];
+  };
+
+  useEffect(() => {
+    return () => {
+      abortControllersRef.current.forEach((ctrl) => ctrl.abort());
+      abortControllersRef.current.clear();
+      revokeBatchBlobs();
+    };
+  }, []);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -192,14 +210,20 @@ export function BatchDownloadModal({
         .replace(/^_+|_+$/g, '')
         .slice(0, 40) || 'batch_video';
     const rawFmt = quality.format.toLowerCase();
+    const isAudioFormat = rawFmt === 'mp3' || rawFmt === 'm4a';
     const fileExt: 'mp3' | 'm4a' | 'mp4' =
       rawFmt === 'mp3' ? 'mp3' : rawFmt === 'm4a' ? 'm4a' : 'mp4';
-    const filename = `${cleanTitle}_${quality.resolution}.${fileExt}`;
+    const downloadExt = rawFmt === 'webm' ? 'webm' : fileExt;
+    const filename = `${cleanTitle}_${isAudioFormat && quality.bitrateKbps ? `${quality.bitrateKbps}kbps` : quality.resolution}.${downloadExt}`;
     const audioParam = quality.audioUrl ? `&audioUrl=${encodeURIComponent(quality.audioUrl)}` : '';
     const sizeParam = quality.fileSizeBytes ? `&fileSizeBytes=${quality.fileSizeBytes}` : '';
-    const scaleParam = quality.targetHeight ? `&scaleHeight=${quality.targetHeight}` : '';
-    const bitrateParam = quality.bitrateKbps ? `&bitrate=${quality.bitrateKbps}k` : '';
-    const endpoint = `/api/download?url=${encodeURIComponent(quality.url)}${audioParam}&filename=${encodeURIComponent(filename)}&format=${fileExt}&resolution=${quality.resolution}${sizeParam}${scaleParam}${bitrateParam}`;
+    const scaleParam =
+      !isAudioFormat && !quality.isNative && quality.targetHeight && quality.targetHeight <= 720
+        ? `&scaleHeight=${quality.targetHeight}`
+        : '';
+    const bitrateParam =
+      isAudioFormat && quality.bitrateKbps ? `&bitrate=${quality.bitrateKbps}k` : '';
+    const endpoint = `/api/download?url=${encodeURIComponent(quality.url)}${audioParam}&filename=${encodeURIComponent(filename)}&format=${downloadExt}&resolution=${quality.resolution}${sizeParam}${scaleParam}${bitrateParam}`;
 
     setItems((prev) =>
       prev.map((it) =>
@@ -267,9 +291,16 @@ export function BatchDownloadModal({
       }
 
       const mimeType =
-        fileExt === 'mp3' ? 'audio/mpeg' : fileExt === 'm4a' ? 'audio/mp4' : 'video/mp4';
+        downloadExt === 'mp3'
+          ? 'audio/mpeg'
+          : downloadExt === 'm4a'
+            ? 'audio/mp4'
+            : downloadExt === 'webm'
+              ? 'video/webm'
+              : 'video/mp4';
       const blob = new Blob(chunks, { type: mimeType });
       const blobUrl = window.URL.createObjectURL(blob);
+      createdBlobsRef.current.push(blobUrl);
 
       onRegisterBlob?.(quality.url, blobUrl);
 
@@ -304,12 +335,6 @@ export function BatchDownloadModal({
         fileSizeFormatted: quality.fileSizeFormatted,
       });
 
-      const isMobile =
-        typeof navigator !== 'undefined' &&
-        /Android|iPhone|iPad|iPod|Mobile|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
-          navigator.userAgent
-        );
-
       const a = document.createElement('a');
       a.style.display = 'none';
       a.href = blobUrl;
@@ -318,15 +343,6 @@ export function BatchDownloadModal({
       document.body.appendChild(a);
       a.click();
       setTimeout(() => a.remove(), 1500);
-
-      if (isMobile) {
-        const hiddenFrame = document.createElement('iframe');
-        hiddenFrame.style.display = 'none';
-        hiddenFrame.setAttribute('aria-hidden', 'true');
-        hiddenFrame.src = endpoint;
-        document.body.appendChild(hiddenFrame);
-        setTimeout(() => hiddenFrame.remove(), 60000);
-      }
     } catch (err: any) {
       if (err.name === 'AbortError' || controller.signal.aborted) return;
       console.error('Batch item download failed:', err);
@@ -513,6 +529,9 @@ export function BatchDownloadModal({
                     <button
                       type="button"
                       onClick={() => {
+                        abortControllersRef.current.forEach((ctrl) => ctrl.abort());
+                        abortControllersRef.current.clear();
+                        revokeBatchBlobs();
                         setItems([]);
                         setRawText('');
                         setActiveWatchItem(null);

@@ -135,6 +135,13 @@ export function MediaResultCard({
   }, [media.id, preferredResolution]);
 
   useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!previewDownloadedModal) return;
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
