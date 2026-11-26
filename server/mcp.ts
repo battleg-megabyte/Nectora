@@ -8,6 +8,7 @@ import {
   sanitizeMediaFormat,
   sanitizeAudioBitrate,
   sanitizeVideoHeight,
+  stripTrackingParams,
 } from './security.js';
 import { QualityOption } from './types.js';
 import { buildLlmsTxt, buildOpenApiSpec } from './agentDocs.js';
@@ -15,7 +16,7 @@ import { buildLlmsTxt, buildOpenApiSpec } from './agentDocs.js';
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-03-26', '2024-11-05'] as const;
 const SERVER_INFO = {
   name: 'wukong-vid-mcp',
-  version: '1.1.0',
+  version: '1.4.0',
 };
 
 interface JsonRpcRequest {
@@ -36,17 +37,46 @@ interface JsonRpcResponse {
   };
 }
 
+interface McpToolAnnotations {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
+}
+
 interface McpToolDefinition {
   name: string;
   description: string;
+  annotations?: McpToolAnnotations;
   inputSchema: Record<string, unknown>;
+}
+
+function projectFields<T extends Record<string, unknown>>(obj: T, fields?: unknown): Record<string, unknown> {
+  if (!Array.isArray(fields) || fields.length === 0) return obj;
+  const allow = new Set(fields.filter((f): f is string => typeof f === 'string' && f.trim().length > 0));
+  if (allow.size === 0) return obj;
+  const out: Record<string, unknown> = {};
+  for (const key of allow) {
+    if (key in obj && obj[key] !== undefined) {
+      out[key] = obj[key];
+    }
+  }
+  return out;
 }
 
 const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: 'list_capabilities',
     description:
-      'Returns all supported video platforms, excluded platforms, available MP4/MP3/M4A quality tiers, and API/MCP endpoint URLs.',
+      'Return supported platforms, excluded platforms (youtube), video/audio quality presets, and API/MCP endpoints.',
+    annotations: {
+      title: 'Capabilities',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       properties: {},
@@ -54,83 +84,148 @@ const MCP_TOOLS: McpToolDefinition[] = [
     },
   },
   {
+    name: 'inspect_url_platform',
+    description:
+      'Instant pre-flight check: validates URL safety (SSRF & YouTube exclusion), detects platform (tiktok, instagram, facebook, twitter, reddit, vimeo, direct), and returns canonical URL with tracking parameters stripped.',
+    annotations: {
+      title: 'Inspect URL & Platform',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+    inputSchema: {
+      type: 'object',
+      required: ['url'],
+      properties: {
+        url: { type: 'string', description: 'URL to validate and classify.' },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'extract_media_streams',
     description:
-      'Extracts video metadata, flat quickLinks (mp4_1080p..360p, mp3_320k..128k, m4a_256k, oneStep), and downloadable stream tiers for a public URL in one fast compact call. Supports optional inline verify_ready probe.',
+      'Resolve a public video/reel/HLS URL into deterministic download links (bestMp4Url, bestMp3Url, bestM4aUrl, oneStepDownloadUrl, curlCommand, qualities). Supports preferred_quality, format_filter, fields projection, and inline verify_ready byte probe.',
+    annotations: {
+      title: 'Extract Media Streams',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       required: ['url'],
       properties: {
         url: {
           type: 'string',
-          description:
-            'Public URL from TikTok, Instagram, Facebook, X/Twitter, Reddit, Vimeo, or a direct video/.m3u8 file (YouTube is excluded).',
+          description: 'Public URL (TikTok, Instagram, Facebook, X, Reddit, Vimeo, direct MP4/HLS; not YouTube).',
         },
         preferred_quality: {
           type: 'string',
           enum: ['2160p', '1440p', '1080p', '720p', '480p', '360p', 'mp3_320k', 'mp3_192k', 'mp3_128k', 'm4a_256k'],
-          description: 'Optional target quality preset to highlight as recommended.',
+        },
+        format_filter: {
+          type: 'string',
+          enum: ['all', 'video', 'audio'],
+          default: 'all',
         },
         compact: {
           type: 'boolean',
           default: true,
-          description: 'Return lean AI-optimized JSON payload (default true) or full raw stream metadata when false.',
+        },
+        fields: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional top-level keys to return (e.g. ["title","bestMp4Url","bestMp3Url"]).',
         },
         verify_ready: {
           type: 'boolean',
           default: false,
-          description: 'When true, immediately verifies playable bytes on the recommended downloadUrl inline without needing a second MCP call.',
+          description: 'Probe first bytes of recommended stream inline to verify valid media headers.',
         },
         cookies: {
           type: 'string',
-          description: 'Optional Cookie header value if needed for an authorized public/account session.',
+          description: 'Optional Cookie header.',
         },
+      },
+    },
+  },
+  {
+    name: 'extract_audio_mp3',
+    description:
+      'Fast 1-call MP3/M4A audio resolver. Converts any public video/reel URL into downloadUrl, oneStepDownloadUrl, curlCommand, and audioTiers.',
+    annotations: {
+      title: 'Extract MP3/M4A Audio',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
+    inputSchema: {
+      type: 'object',
+      required: ['url'],
+      properties: {
+        url: { type: 'string' },
+        bitrate: {
+          type: 'string',
+          enum: ['320k', '192k', '128k', 'm4a_256k'],
+          default: '320k',
+        },
+        verify_ready: {
+          type: 'boolean',
+          default: false,
+        },
+        cookies: { type: 'string' },
       },
     },
   },
   {
     name: 'build_download_url',
     description:
-      'Builds a ready-to-download WuKong-Vid attachment URL (/api/download) and inline preview URL (/api/proxy-media) for an extracted stream URL and desired output format.',
+      'Construct validated /api/download attachment URL and /api/proxy-media preview URL from a stream_url.',
+    annotations: {
+      title: 'Build Download URL',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
     inputSchema: {
       type: 'object',
       required: ['stream_url'],
       properties: {
-        stream_url: {
-          type: 'string',
-          description: 'Upstream media stream URL returned by extract_media_streams or a direct HTTP(S) media file.',
-        },
-        audio_url: {
-          type: 'string',
-          description: 'Optional separate audio track URL when muxing DASH video + audio into MP4.',
-        },
+        stream_url: { type: 'string' },
+        audio_url: { type: 'string' },
         format: {
           type: 'string',
           enum: ['mp4', 'mp3', 'm4a', 'webm'],
           default: 'mp4',
-          description: 'Desired download file format.',
         },
         bitrate: {
           type: 'string',
           enum: ['320k', '192k', '128k', '256k'],
-          description: 'Audio bitrate for MP3 (320k/192k/128k) or M4A (256k).',
         },
         scale_height: {
           type: 'integer',
           enum: [720, 480, 360],
-          description: 'Optional MP4 target height for compact transcoding (720, 480, or 360).',
         },
-        filename: {
-          type: 'string',
-          description: 'Optional clean base filename for the downloaded file.',
-        },
+        filename: { type: 'string' },
       },
     },
   },
   {
     name: 'batch_extract_media',
     description:
-      'Extracts media metadata and download links for up to 10 public URLs concurrently in a single call.',
+      'Extract up to 10 public URLs concurrently in one call. Supports preferred_quality, format_filter, and fields projection.',
+    annotations: {
+      title: 'Batch Extract (<=10 URLs)',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       required: ['urls'],
@@ -140,12 +235,19 @@ const MCP_TOOLS: McpToolDefinition[] = [
           minItems: 1,
           maxItems: 10,
           items: { type: 'string' },
-          description: 'Array of up to 10 public media URLs.',
         },
         preferred_quality: {
           type: 'string',
           enum: ['2160p', '1440p', '1080p', '720p', '480p', '360p', 'mp3_320k', 'mp3_192k', 'mp3_128k', 'm4a_256k'],
-          description: 'Optional target quality preset.',
+        },
+        format_filter: {
+          type: 'string',
+          enum: ['all', 'video', 'audio'],
+          default: 'all',
+        },
+        fields: {
+          type: 'array',
+          items: { type: 'string' },
         },
       },
     },
@@ -153,19 +255,20 @@ const MCP_TOOLS: McpToolDefinition[] = [
   {
     name: 'verify_download_stream',
     description:
-      'Performs a lightweight live byte-probe on a WuKong-Vid download URL (or upstream stream) to verify it streams playable bytes before presenting it to the user.',
+      'Probe first bytes of /api/download to confirm playable payload and valid MP4/MP3/M4A magic headers (cached 30s).',
+    annotations: {
+      title: 'Verify Stream Headers',
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: true,
+    },
     inputSchema: {
       type: 'object',
       required: ['stream_url'],
       properties: {
-        stream_url: {
-          type: 'string',
-          description: 'The extracted stream URL to verify via /api/download.',
-        },
-        audio_url: {
-          type: 'string',
-          description: 'Optional separate audio track URL.',
-        },
+        stream_url: { type: 'string' },
+        audio_url: { type: 'string' },
         format: {
           type: 'string',
           enum: ['mp4', 'mp3', 'm4a'],
@@ -187,20 +290,29 @@ const MCP_TOOLS: McpToolDefinition[] = [
 const MCP_RESOURCES = [
   {
     uri: 'wukong://guide/agent-quickstart',
-    name: 'WuKong-Vid Agent Quickstart Guide',
-    description: 'Markdown quickstart for using WuKong-Vid MCP tools and REST endpoints.',
+    name: 'Agent Quickstart (llms.txt)',
+    description: 'Concise machine spec for WuKong-Vid MCP & REST tools.',
     mimeType: 'text/markdown',
   },
   {
     uri: 'wukong://capabilities/platforms',
-    name: 'Supported Platforms & Formats Matrix',
-    description: 'Machine-readable capabilities, limits, and quality presets.',
+    name: 'Capabilities Matrix',
+    description: 'JSON capability matrix (platforms, exclusions, presets, endpoints).',
     mimeType: 'application/json',
   },
   {
     uri: 'wukong://schema/openapi',
-    name: 'WuKong-Vid OpenAPI 3.1 Specification',
-    description: 'Complete OpenAPI 3.1 schema describing REST and MCP endpoints.',
+    name: 'OpenAPI 3.1 Spec',
+    description: 'OpenAPI 3.1 schema for REST & MCP endpoints.',
+    mimeType: 'application/json',
+  },
+];
+
+const MCP_RESOURCE_TEMPLATES = [
+  {
+    uriTemplate: 'wukong://extract/{url}',
+    name: 'Extract Media by URI',
+    description: 'Directly extract compact downloadable MP4/MP3/M4A links for a URL-encoded public media link.',
     mimeType: 'application/json',
   },
 ];
@@ -208,30 +320,24 @@ const MCP_RESOURCES = [
 const MCP_PROMPTS = [
   {
     name: 'extract_media_workflow',
-    description: 'Guide an assistant through extracting a public video URL and returning the best downloadable MP4 or MP3 link.',
+    description: 'Extract downloadable MP4/MP3/M4A links from a public URL.',
     arguments: [
-      {
-        name: 'url',
-        description: 'The public media URL provided by the user.',
-        required: true,
-      },
-      {
-        name: 'preferred_quality',
-        description: 'Optional quality preference such as 1080p, 720p, 480p, 360p, mp3_320k, or m4a_256k.',
-        required: false,
-      },
+      { name: 'url', description: 'Public media URL.', required: true },
+      { name: 'preferred_quality', description: '1080p|720p|480p|360p|mp3_320k|m4a_256k', required: false },
+    ],
+  },
+  {
+    name: 'extract_audio_workflow',
+    description: 'Extract downloadable MP3/M4A audio via extract_audio_mp3.',
+    arguments: [
+      { name: 'url', description: 'Public media URL.', required: true },
+      { name: 'bitrate', description: '320k|192k|128k|m4a_256k', required: false },
     ],
   },
   {
     name: 'batch_extract_workflow',
-    description: 'Guide an assistant through resolving multiple public video URLs at once using batch_extract_media.',
-    arguments: [
-      {
-        name: 'urls',
-        description: 'Comma- or newline-separated list of public URLs.',
-        required: true,
-      },
-    ],
+    description: 'Extract up to 10 public URLs concurrently.',
+    arguments: [{ name: 'urls', description: 'Comma/newline URLs.', required: true }],
   },
 ];
 
@@ -282,20 +388,31 @@ export function selectRecommendedQuality(
   if (!preferred) {
     return qualities.find((q) => q.format === 'mp4') || qualities[0];
   }
-  const p = preferred.toLowerCase();
+  const p = preferred.toLowerCase().trim();
   if (p === 'mp3' || p.startsWith('mp3_')) {
     const kbps = parseInt(p.replace('mp3_', '').replace('k', ''), 10) || 320;
-    return qualities.find((q) => q.format === 'mp3' && q.bitrateKbps === kbps) ||
-      qualities.find((q) => q.format === 'mp3');
+    return (
+      qualities.find((q) => q.format === 'mp3' && q.bitrateKbps === kbps) ||
+      qualities.find((q) => q.format === 'mp3')
+    );
   }
   if (p === 'm4a' || p.startsWith('m4a_')) {
-    return qualities.find((q) => q.format === 'm4a');
+    return qualities.find((q) => q.format === 'm4a') || qualities.find((q) => q.format === 'mp3');
+  }
+  if (p === '4k') {
+    return (
+      qualities.find((q) => q.format === 'mp4' && (q.resolution.includes('2160') || q.height === 2160)) ||
+      qualities.find((q) => q.format === 'mp4')
+    );
   }
   const targetH = parseInt(p.replace('p', ''), 10);
   if (!Number.isNaN(targetH)) {
     return (
-      qualities.find((q) => q.format === 'mp4' && (q.targetHeight === targetH || q.resolution.toLowerCase().includes(`${targetH}p`))) ||
-      qualities.find((q) => q.format === 'mp4')
+      qualities.find(
+        (q) =>
+          q.format === 'mp4' &&
+          (q.targetHeight === targetH || q.resolution.toLowerCase().includes(`${targetH}p`))
+      ) || qualities.find((q) => q.format === 'mp4')
     );
   }
   return qualities[0];
@@ -306,7 +423,8 @@ export function buildQuickLinksMap(
   originalUrl: string,
   title: string,
   qualities: QualityOption[],
-  preferred = '1080p'
+  preferred = '1080p',
+  formatFilter: 'all' | 'video' | 'audio' = 'all'
 ): Record<string, string> {
   const links: Record<string, string> = {
     oneStep: `${origin}/api/quick-download?url=${encodeURIComponent(originalUrl)}&quality=${encodeURIComponent(preferred)}`,
@@ -315,39 +433,99 @@ export function buildQuickLinksMap(
     const match = qualities.find(predicate);
     return match ? buildQualityDownloadLinks(origin, title, match).downloadUrl : undefined;
   };
-  const bestMp4 = findLink((q) => q.format === 'mp4');
-  if (bestMp4) links.bestMp4 = bestMp4;
-  for (const h of [1080, 720, 480, 360]) {
-    const l = findLink((q) => q.format === 'mp4' && (q.targetHeight === h || q.resolution.toLowerCase().includes(`${h}p`)));
-    if (l) links[`mp4_${h}p`] = l;
+  if (formatFilter !== 'audio') {
+    const bestMp4 = findLink((q) => q.format === 'mp4');
+    if (bestMp4) links.bestMp4 = bestMp4;
+    for (const h of [2160, 1440, 1080, 720, 480, 360]) {
+      const l = findLink(
+        (q) => q.format === 'mp4' && (q.targetHeight === h || q.resolution.toLowerCase().includes(`${h}p`))
+      );
+      if (l) links[`mp4_${h}p`] = l;
+    }
   }
-  for (const kbps of [320, 192, 128]) {
-    const l = findLink((q) => q.format === 'mp3' && q.bitrateKbps === kbps);
-    if (l) links[`mp3_${kbps}k`] = l;
+  if (formatFilter !== 'video') {
+    const verifiedAudio = qualities.find((q) => q.format === 'mp3' || q.format === 'm4a');
+    if (verifiedAudio) {
+      for (const kbps of [320, 192, 128]) {
+        const match = qualities.find((q) => q.format === 'mp3' && q.bitrateKbps === kbps);
+        links[`mp3_${kbps}k`] = buildQualityDownloadLinks(
+          origin,
+          title,
+          match || { ...verifiedAudio, format: 'mp3', bitrateKbps: kbps }
+        ).downloadUrl;
+      }
+      const m4aMatch = qualities.find((q) => q.format === 'm4a');
+      links.m4a_256k = buildQualityDownloadLinks(
+        origin,
+        title,
+        m4aMatch || { ...verifiedAudio, format: 'm4a', bitrateKbps: 256 }
+      ).downloadUrl;
+    }
   }
-  const m4a = findLink((q) => q.format === 'm4a');
-  if (m4a) links.m4a_256k = m4a;
   return links;
 }
 
+function inspectMagicHeader(bytes: Uint8Array, format: string): { validHeader: boolean; headerHex: string } {
+  const hex = Array.from(bytes.slice(0, 12))
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join(' ');
+  if (bytes.length < 4) return { validHeader: false, headerHex: hex };
+
+  const f = format.toLowerCase();
+  if (f === 'mp3') {
+    const isId3 = bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33;
+    const isMpegSync = bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0;
+    return { validHeader: isId3 || isMpegSync, headerHex: hex };
+  }
+  if (f === 'mp4' || f === 'm4a') {
+    const isFtyp =
+      bytes.length >= 8 &&
+      bytes[4] === 0x66 &&
+      bytes[5] === 0x74 &&
+      bytes[6] === 0x79 &&
+      bytes[7] === 0x70;
+    return { validHeader: isFtyp, headerHex: hex };
+  }
+  if (f === 'webm') {
+    const isEbml = bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+    return { validHeader: isEbml, headerHex: hex };
+  }
+  return { validHeader: bytes.length > 0, headerHex: hex };
+}
+
 const VERIFIED_PROBE_TTL_MS = 30_000;
-const verifiedProbeCache = new Map<string, { expiresAt: number; bytesProbed: number; contentType: string }>();
+const verifiedProbeCache = new Map<
+  string,
+  { expiresAt: number; bytesProbed: number; contentType: string; validHeader: boolean; headerHex: string }
+>();
 
 async function probeLocalDownloadStream(
   localPort: number,
   params: URLSearchParams
-): Promise<{ ok: true; bytesProbed: number; contentType: string; cached?: boolean } | { ok: false; error: string; contentType?: string }> {
+): Promise<
+  | { ok: true; bytesProbed: number; contentType: string; validHeader: boolean; headerHex: string; cached?: boolean }
+  | { ok: false; error: string; contentType?: string }
+> {
   const cacheKey = params.toString();
   const cached = verifiedProbeCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    return { ok: true, bytesProbed: cached.bytesProbed, contentType: cached.contentType, cached: true };
+    return {
+      ok: true,
+      bytesProbed: cached.bytesProbed,
+      contentType: cached.contentType,
+      validHeader: cached.validHeader,
+      headerHex: cached.headerHex,
+      cached: true,
+    };
   }
 
+  const format = params.get('format') || 'mp4';
   const probeUrl = `http://127.0.0.1:${localPort}/api/download?${cacheKey}`;
   const ctrl = new AbortController();
-  const timeout = setTimeout(() => ctrl.abort(), 14000);
+  const timeout = setTimeout(() => ctrl.abort(), 8500);
   let bytesProbed = 0;
   let contentType = '';
+  let headBytes = new Uint8Array(0);
   try {
     const probeRes = await fetch(probeUrl, { signal: ctrl.signal });
     contentType = probeRes.headers.get('content-type') || '';
@@ -359,6 +537,12 @@ async function probeLocalDownloadStream(
       const { done, value } = await reader.read();
       if (done) break;
       if (value && value.length > 0) {
+        if (headBytes.length < 16) {
+          const merged = new Uint8Array(Math.min(16, headBytes.length + value.length));
+          merged.set(headBytes, 0);
+          merged.set(value.slice(0, merged.length - headBytes.length), headBytes.length);
+          headBytes = merged;
+        }
         bytesProbed += value.length;
         if (bytesProbed >= 2048) {
           await reader.cancel().catch(() => {});
@@ -367,6 +551,7 @@ async function probeLocalDownloadStream(
         }
       }
     }
+    const { validHeader, headerHex } = inspectMagicHeader(headBytes, format);
     if (bytesProbed > 0) {
       if (verifiedProbeCache.size >= 200) {
         const oldest = verifiedProbeCache.keys().next().value;
@@ -376,17 +561,26 @@ async function probeLocalDownloadStream(
         expiresAt: Date.now() + VERIFIED_PROBE_TTL_MS,
         bytesProbed,
         contentType,
+        validHeader,
+        headerHex,
       });
     }
-    return { ok: true, bytesProbed, contentType };
+    return { ok: true, bytesProbed, contentType, validHeader, headerHex };
   } catch (err: any) {
     if (bytesProbed > 0 && err?.name === 'AbortError') {
+      const { validHeader, headerHex } = inspectMagicHeader(headBytes, format);
+      if (verifiedProbeCache.size >= 200) {
+        const oldest = verifiedProbeCache.keys().next().value;
+        if (oldest) verifiedProbeCache.delete(oldest);
+      }
       verifiedProbeCache.set(cacheKey, {
         expiresAt: Date.now() + VERIFIED_PROBE_TTL_MS,
         bytesProbed,
         contentType,
+        validHeader,
+        headerHex,
       });
-      return { ok: true, bytesProbed, contentType };
+      return { ok: true, bytesProbed, contentType, validHeader, headerHex };
     }
     return { ok: false, error: err?.message || 'Failed to verify stream.' };
   } finally {
@@ -431,6 +625,24 @@ async function callMcpTool(
       });
     }
 
+    case 'inspect_url_platform': {
+      const targetUrl = typeof args.url === 'string' ? args.url.trim() : '';
+      if (!targetUrl) {
+        return fail('Missing required parameter: url');
+      }
+      const platform = adapterManager.detectPlatform(targetUrl);
+      const safe = await validateSafeUrl(targetUrl);
+      const normalizedUrl = safe.safe ? stripTrackingParams(targetUrl) : undefined;
+      return ok({
+        url: targetUrl,
+        valid: safe.safe,
+        allowed: safe.safe && platform !== 'unsupported',
+        platform: safe.safe ? platform : 'blocked',
+        ...(normalizedUrl ? { normalizedUrl } : {}),
+        ...(safe.error ? { reason: safe.error } : {}),
+      });
+    }
+
     case 'extract_media_streams': {
       const targetUrl = typeof args.url === 'string' ? args.url.trim() : '';
       if (!targetUrl) {
@@ -442,6 +654,8 @@ async function callMcpTool(
       }
 
       const preferred = typeof args.preferred_quality === 'string' ? args.preferred_quality : undefined;
+      const formatFilter =
+        args.format_filter === 'video' || args.format_filter === 'audio' ? args.format_filter : 'all';
       const compact = args.compact !== false;
       const verifyReady = args.verify_ready === true;
       const cookies = typeof args.cookies === 'string' ? args.cookies : undefined;
@@ -451,8 +665,19 @@ async function callMcpTool(
       }
 
       const meta = extracted.data;
-      const quickLinks = buildQuickLinksMap(origin, targetUrl, meta.title, meta.qualities, preferred || '1080p');
-      const recommended = selectRecommendedQuality(meta.qualities, preferred);
+      const quickLinks = buildQuickLinksMap(
+        origin,
+        targetUrl,
+        meta.title,
+        meta.qualities,
+        preferred || (formatFilter === 'audio' ? 'mp3_320k' : '1080p'),
+        formatFilter
+      );
+      const recommended =
+        selectRecommendedQuality(
+          meta.qualities,
+          preferred || (formatFilter === 'audio' ? 'mp3_320k' : undefined)
+        ) || meta.qualities[0];
       const recommendedLinks = recommended
         ? {
             id: recommended.id,
@@ -464,7 +689,9 @@ async function callMcpTool(
           }
         : undefined;
 
-      let verifiedStatus: { ready: boolean; bytesProbed?: number; contentType?: string; cached?: boolean } | undefined;
+      let verifiedStatus:
+        | { ready: boolean; bytesProbed?: number; contentType?: string; validHeader?: boolean; cached?: boolean }
+        | undefined;
       if (verifyReady && recommended) {
         const probeParams = new URLSearchParams({
           url: recommended.url,
@@ -480,11 +707,24 @@ async function callMcpTool(
         }
         const probed = await probeLocalDownloadStream(localPort, probeParams);
         verifiedStatus = probed.ok
-          ? { ready: true, bytesProbed: probed.bytesProbed, contentType: probed.contentType, ...(probed.cached ? { cached: true } : {}) }
+          ? {
+              ready: true,
+              bytesProbed: probed.bytesProbed,
+              contentType: probed.contentType,
+              validHeader: probed.validHeader,
+              ...(probed.cached ? { cached: true } : {}),
+            }
           : { ready: false };
       }
 
-      const tiers = meta.qualities.map((q) => {
+      const filteredQualities = meta.qualities.filter((q) => {
+        const isAud = q.format === 'mp3' || q.format === 'm4a';
+        if (formatFilter === 'video') return !isAud;
+        if (formatFilter === 'audio') return isAud;
+        return true;
+      });
+
+      const tiers = filteredQualities.map((q) => {
         const links = buildQualityDownloadLinks(origin, meta.title, q);
         if (compact) {
           return {
@@ -500,23 +740,131 @@ async function callMcpTool(
         return { ...q, ...links };
       });
 
-      return ok({
+      const recFile = recommended
+        ? sanitizeFilename(meta.title || 'wukong_media', recommended.format)
+        : 'wukong_media.mp4';
+
+      const hasVideo = meta.qualities.some((q) => q.format !== 'mp3' && q.format !== 'm4a');
+      const hasAudio = meta.qualities.some((q) => q.format === 'mp3' || q.format === 'm4a' || q.hasAudio !== false);
+
+      const fullPayload: Record<string, unknown> = {
         id: meta.id,
         platform: meta.platform,
+        normalizedUrl: stripTrackingParams(targetUrl),
         title: meta.title,
         author: meta.author,
         durationSeconds: meta.durationSeconds,
         durationFormatted: meta.durationFormatted,
+        hasVideo,
+        hasAudio,
+        bestMp4Url: quickLinks.bestMp4,
+        ...(quickLinks.mp4_720p ? { best720pUrl: quickLinks.mp4_720p } : {}),
+        ...(quickLinks.mp4_480p ? { best480pUrl: quickLinks.mp4_480p } : {}),
+        ...(quickLinks.mp4_360p ? { best360pUrl: quickLinks.mp4_360p } : {}),
+        bestMp3Url: quickLinks.mp3_320k,
+        bestM4aUrl: quickLinks.m4a_256k,
+        oneStepDownloadUrl: quickLinks.oneStep,
+        curlCommand: recommendedLinks
+          ? `curl -L "${recommendedLinks.downloadUrl}" -o "${recFile}"`
+          : `curl -L "${quickLinks.oneStep}" -o "${recFile}"`,
         quickLinks,
         recommended: recommendedLinks,
         ...(verifiedStatus ? { streamVerified: verifiedStatus } : {}),
         ...(compact ? {} : { thumbnailUrl: meta.thumbnailUrl, sourceType: meta.sourceType }),
         qualities: tiers,
+      };
+
+      return ok(projectFields(fullPayload, args.fields));
+    }
+
+    case 'extract_audio_mp3': {
+      const targetUrl = typeof args.url === 'string' ? args.url.trim() : '';
+      if (!targetUrl) {
+        return fail('Missing required parameter: url');
+      }
+      const safe = await validateSafeUrl(targetUrl);
+      if (!safe.safe) {
+        return fail(safe.error || 'URL is invalid or blocked.');
+      }
+
+      const rawBitrate = typeof args.bitrate === 'string' ? args.bitrate.trim().toLowerCase() : '320k';
+      const preferredPreset = rawBitrate === 'm4a_256k' ? 'm4a_256k' : `mp3_${rawBitrate.replace('mp3_', '')}`;
+      const cookies = typeof args.cookies === 'string' ? args.cookies : undefined;
+      const extracted = await adapterManager.extract(targetUrl, cookies);
+      if (!extracted.success || !extracted.data) {
+        return fail(extracted.error || 'Unable to extract audio stream from URL.');
+      }
+
+      const meta = extracted.data;
+      const chosen =
+        selectRecommendedQuality(meta.qualities, preferredPreset) ||
+        meta.qualities.find((q) => q.format === 'mp3' || q.format === 'm4a');
+      if (!chosen) {
+        return fail('No audio stream could be extracted for this URL.');
+      }
+
+      const links = buildQualityDownloadLinks(origin, meta.title, chosen);
+      const oneStepUrl = `${origin}/api/quick-download?url=${encodeURIComponent(targetUrl)}&quality=${encodeURIComponent(preferredPreset)}`;
+      const safeFile = sanitizeFilename(meta.title || 'wukong_audio', chosen.format);
+
+      let verifiedStatus:
+        | { ready: boolean; bytesProbed?: number; contentType?: string; validHeader?: boolean; cached?: boolean }
+        | undefined;
+      if (args.verify_ready === true) {
+        const probeParams = new URLSearchParams({
+          url: chosen.url,
+          format: chosen.format,
+          filename: safeFile,
+        });
+        if (chosen.audioUrl) probeParams.set('audioUrl', chosen.audioUrl);
+        if (chosen.bitrateKbps) probeParams.set('bitrate', `${chosen.bitrateKbps}k`);
+        const probed = await probeLocalDownloadStream(localPort, probeParams);
+        verifiedStatus = probed.ok
+          ? {
+              ready: true,
+              bytesProbed: probed.bytesProbed,
+              contentType: probed.contentType,
+              validHeader: probed.validHeader,
+              ...(probed.cached ? { cached: true } : {}),
+            }
+          : { ready: false };
+      }
+
+      const audioTiers = meta.qualities
+        .filter((q) => q.format === 'mp3' || q.format === 'm4a')
+        .map((q) => ({
+          id: q.id,
+          label: q.label,
+          format: q.format,
+          bitrateKbps: q.bitrateKbps,
+          fileSizeFormatted: q.fileSizeFormatted,
+          ...buildQualityDownloadLinks(origin, meta.title, q),
+        }));
+
+      return ok({
+        id: meta.id,
+        platform: meta.platform,
+        title: meta.title,
+        durationFormatted: meta.durationFormatted,
+        format: chosen.format,
+        bitrateKbps: chosen.bitrateKbps || 320,
+        filename: safeFile,
+        downloadUrl: links.downloadUrl,
+        previewUrl: links.previewUrl,
+        oneStepDownloadUrl: oneStepUrl,
+        curlCommand: `curl -L "${links.downloadUrl}" -o "${safeFile}"`,
+        ...(verifiedStatus ? { streamVerified: verifiedStatus } : {}),
+        audioTiers,
       });
     }
 
     case 'build_download_url': {
-      const streamUrl = typeof args.stream_url === 'string' ? args.stream_url.trim() : '';
+      const streamUrl =
+        typeof args.stream_url === 'string' && args.stream_url.trim()
+          ? args.stream_url.trim()
+          : typeof args.url === 'string'
+            ? args.url.trim()
+            : '';
       if (!streamUrl) {
         return fail('Missing required parameter: stream_url');
       }
@@ -560,23 +908,29 @@ async function callMcpTool(
       if (audioUrl) previewParams.set('audioUrl', audioUrl);
       if (bitrate) previewParams.set('bitrate', bitrate);
 
+      const downloadUrl = `${origin}/api/download?${params.toString()}`;
       return ok({
         format,
         filename,
         ...(bitrate ? { bitrate } : {}),
         ...(scaleHeight ? { scaleHeight } : {}),
-        downloadUrl: `${origin}/api/download?${params.toString()}`,
+        downloadUrl,
         previewUrl: `${origin}/api/proxy-media?${previewParams.toString()}`,
+        curlCommand: `curl -L "${downloadUrl}" -o "${filename}"`,
       });
     }
 
     case 'batch_extract_media': {
-      const rawUrls = Array.isArray(args.urls) ? args.urls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0) : [];
+      const rawUrls = Array.isArray(args.urls)
+        ? args.urls.filter((u): u is string => typeof u === 'string' && u.trim().length > 0)
+        : [];
       if (rawUrls.length === 0) {
         return fail('Provide 1 to 10 public URLs in the urls array.');
       }
       const urls = rawUrls.slice(0, 10);
       const preferred = typeof args.preferred_quality === 'string' ? args.preferred_quality : undefined;
+      const formatFilter =
+        args.format_filter === 'video' || args.format_filter === 'audio' ? args.format_filter : 'all';
 
       const results = await Promise.all(
         urls.map(async (u) => {
@@ -590,30 +944,50 @@ async function callMcpTool(
             return { url: cleanUrl, success: false, error: extracted.error || 'Extraction failed' };
           }
           const meta = extracted.data;
-          const rec = selectRecommendedQuality(meta.qualities, preferred);
-          const quickLinks = buildQuickLinksMap(origin, cleanUrl, meta.title, meta.qualities, preferred || '1080p');
-          return {
+          const rec = selectRecommendedQuality(
+            meta.qualities,
+            preferred || (formatFilter === 'audio' ? 'mp3_320k' : undefined)
+          );
+          const quickLinks = buildQuickLinksMap(
+            origin,
+            cleanUrl,
+            meta.title,
+            meta.qualities,
+            preferred || (formatFilter === 'audio' ? 'mp3_320k' : '1080p'),
+            formatFilter
+          );
+          const row: Record<string, unknown> = {
             url: cleanUrl,
             success: true,
             platform: meta.platform,
             title: meta.title,
             durationFormatted: meta.durationFormatted,
+            bestMp4Url: quickLinks.bestMp4,
+            bestMp3Url: quickLinks.mp3_320k,
+            bestM4aUrl: quickLinks.m4a_256k,
+            oneStepDownloadUrl: quickLinks.oneStep,
             quickLinks,
             recommended: rec ? { id: rec.id, label: rec.label, format: rec.format, ...buildQualityDownloadLinks(origin, meta.title, rec) } : undefined,
             qualitiesCount: meta.qualities.length,
           };
+          return projectFields(row, args.fields);
         })
       );
 
       return ok({
         total: results.length,
-        succeeded: results.filter((r) => r.success).length,
+        succeeded: results.filter((r) => r.success !== false).length,
         results,
       });
     }
 
     case 'verify_download_stream': {
-      const streamUrl = typeof args.stream_url === 'string' ? args.stream_url.trim() : '';
+      const streamUrl =
+        typeof args.stream_url === 'string' && args.stream_url.trim()
+          ? args.stream_url.trim()
+          : typeof args.url === 'string'
+            ? args.url.trim()
+            : '';
       if (!streamUrl) {
         return fail('Missing required parameter: stream_url');
       }
@@ -648,6 +1022,8 @@ async function callMcpTool(
         ready: probed.bytesProbed > 0,
         bytesProbed: probed.bytesProbed,
         contentType: probed.contentType,
+        validContainerHeader: probed.validHeader,
+        headerHex: probed.headerHex,
         ...(probed.cached ? { cached: true } : {}),
         downloadUrl: `${origin}/api/download?${params.toString()}`,
       });
@@ -674,7 +1050,6 @@ async function handleJsonRpcMessage(
     };
   }
 
-  // Notifications require no response payload
   if (isNotification || msg.method.startsWith('notifications/')) {
     return null;
   }
@@ -696,10 +1071,11 @@ async function handleJsonRpcMessage(
             tools: { listChanged: false },
             resources: { subscribe: false, listChanged: false },
             prompts: { listChanged: false },
+            completions: {},
           },
           serverInfo: SERVER_INFO,
           instructions:
-            'WuKong-Vid MCP extracts video and audio streams from public links (TikTok, Instagram, Facebook, X/Twitter, Reddit, Vimeo, and direct video/HLS URLs; YouTube is excluded). Call extract_media_streams with a URL to receive ready-to-download MP4, MP3, and M4A URLs.',
+            'MACHINE_CONTRACT: WuKong-Vid MCP v1.4.0 extracts deterministic MP4 (2160p-360p) and MP3/M4A download URLs for public TikTok, Instagram, Facebook, X, Reddit, Vimeo, and direct video/HLS links (YouTube excluded -> HTTP 400). Workflow: inspect_url_platform(url) for zero-latency preflight, or call extract_media_streams(url, compact=true), extract_audio_mp3(url), or batch_extract_media(urls). Pass fields=["bestMp4Url","bestMp3Url","title"] for minimal tokens.',
         },
       };
     }
@@ -739,8 +1115,36 @@ async function handleJsonRpcMessage(
         result: { resources: MCP_RESOURCES },
       };
 
+    case 'resources/templates/list':
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: { resourceTemplates: MCP_RESOURCE_TEMPLATES },
+      };
+
     case 'resources/read': {
       const uri = typeof params.uri === 'string' ? params.uri : '';
+      if (uri.startsWith('wukong://extract/')) {
+        let encodedUrl = uri.slice('wukong://extract/'.length);
+        try {
+          encodedUrl = decodeURIComponent(encodedUrl);
+        } catch {}
+        const extracted = await callMcpTool('extract_media_streams', { url: encodedUrl, compact: true }, origin, localPort);
+        if (extracted.isError) {
+          return {
+            jsonrpc: '2.0',
+            id,
+            error: { code: -32002, message: extracted.content?.[0]?.text || 'Unable to extract URI resource' },
+          };
+        }
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            contents: [{ uri, mimeType: 'application/json', text: extracted.content[0].text }],
+          },
+        };
+      }
       if (uri === 'wukong://guide/agent-quickstart') {
         return {
           jsonrpc: '2.0',
@@ -753,6 +1157,7 @@ async function handleJsonRpcMessage(
       if (uri === 'wukong://capabilities/platforms') {
         const capPayload = {
           service: 'WuKong-Vid',
+          version: SERVER_INFO.version,
           supportedPlatforms: ['tiktok', 'instagram', 'facebook', 'twitter', 'reddit', 'vimeo', 'direct'],
           excludedPlatforms: ['youtube'],
           qualities: ['2160p', '1440p', '1080p', '720p', '480p', '360p', 'mp3_320k', 'mp3_192k', 'mp3_128k', 'm4a_256k'],
@@ -762,7 +1167,7 @@ async function handleJsonRpcMessage(
           jsonrpc: '2.0',
           id,
           result: {
-            contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(capPayload, null, 2) }],
+            contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(capPayload) }],
           },
         };
       }
@@ -771,7 +1176,7 @@ async function handleJsonRpcMessage(
           jsonrpc: '2.0',
           id,
           result: {
-            contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(buildOpenApiSpec(origin), null, 2) }],
+            contents: [{ uri, mimeType: 'application/json', text: JSON.stringify(buildOpenApiSpec(origin)) }],
           },
         };
       }
@@ -779,6 +1184,29 @@ async function handleJsonRpcMessage(
         jsonrpc: '2.0',
         id,
         error: { code: -32002, message: `Resource not found: ${uri}` },
+      };
+    }
+
+    case 'completion/complete': {
+      const argName = typeof params.argument?.name === 'string' ? params.argument.name : '';
+      const argVal = typeof params.argument?.value === 'string' ? params.argument.value.toLowerCase().trim() : '';
+      const pool =
+        argName === 'bitrate'
+          ? ['320k', '192k', '128k', 'm4a_256k']
+          : argName === 'preferred_quality'
+            ? ['2160p', '1440p', '1080p', '720p', '480p', '360p', 'mp3_320k', 'mp3_192k', 'mp3_128k', 'm4a_256k']
+            : [];
+      const values = pool.filter((item) => item.toLowerCase().startsWith(argVal));
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          completion: {
+            values,
+            total: values.length,
+            hasMore: false,
+          },
+        },
       };
     }
 
@@ -799,13 +1227,33 @@ async function handleJsonRpcMessage(
           jsonrpc: '2.0',
           id,
           result: {
-            description: 'Extract downloadable video/audio links from a public URL using WuKong-Vid.',
+            description: 'Extract downloadable video/audio URLs.',
             messages: [
               {
                 role: 'user',
                 content: {
                   type: 'text',
-                  text: `Call the \`extract_media_streams\` tool for url="${u}" with preferred_quality="${q}". Verify the chosen stream if needed using \`verify_download_stream\`, then present the direct \`downloadUrl\` and metadata clearly to the user.`,
+                  text: `Call extract_media_streams(url="${u}", preferred_quality="${q}", compact=true) and return downloadUrl + curlCommand.`,
+                },
+              },
+            ],
+          },
+        };
+      }
+      if (promptName === 'extract_audio_workflow') {
+        const u = typeof pArgs.url === 'string' ? pArgs.url : '<URL>';
+        const b = typeof pArgs.bitrate === 'string' ? pArgs.bitrate : '320k';
+        return {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            description: 'Extract MP3/M4A audio.',
+            messages: [
+              {
+                role: 'user',
+                content: {
+                  type: 'text',
+                  text: `Call extract_audio_mp3(url="${u}", bitrate="${b}") and return downloadUrl + oneStepDownloadUrl.`,
                 },
               },
             ],
@@ -818,13 +1266,13 @@ async function handleJsonRpcMessage(
           jsonrpc: '2.0',
           id,
           result: {
-            description: 'Extract multiple public media URLs concurrently.',
+            description: 'Batch extract public media URLs.',
             messages: [
               {
                 role: 'user',
                 content: {
                   type: 'text',
-                  text: `Parse these public links (${urls}) into an array and call \`batch_extract_media\` to return direct downloadable links for each item.`,
+                  text: `Call batch_extract_media(urls=[${urls}]) and return quickLinks per URL.`,
                 },
               },
             ],
@@ -861,8 +1309,7 @@ export function createMcpHandlers(resolvePublicOrigin: (req: Request) => string,
       return;
     }
 
-    const sessionId =
-      (req.headers['mcp-session-id'] as string) || crypto.randomUUID();
+    const sessionId = (req.headers['mcp-session-id'] as string) || crypto.randomUUID();
     res.setHeader('Mcp-Session-Id', sessionId);
     res.setHeader('Cache-Control', 'no-cache');
 
@@ -882,7 +1329,6 @@ export function createMcpHandlers(resolvePublicOrigin: (req: Request) => string,
     }
 
     const accept = (req.headers.accept || '').toLowerCase();
-    // If client specifically accepts ONLY text/event-stream (without preferring JSON), emit SSE event frame
     const prefersSse = accept.includes('text/event-stream') && !accept.includes('application/json');
     if (prefersSse) {
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
@@ -904,7 +1350,6 @@ export function createMcpHandlers(resolvePublicOrigin: (req: Request) => string,
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.setHeader('Mcp-Session-Id', sessionId);
-      // Emit standard legacy SSE endpoint event + keepalive heartbeat
       res.write(`event: endpoint\ndata: ${origin}/mcp?sessionId=${encodeURIComponent(sessionId)}\n\n`);
       const keepalive = setInterval(() => {
         if (!res.writableEnded) {
@@ -923,8 +1368,9 @@ export function createMcpHandlers(resolvePublicOrigin: (req: Request) => string,
       transport: 'streamable-http',
       endpoint: `${origin}/mcp`,
       manifest: `${origin}/.well-known/mcp.json`,
-      tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description })),
+      tools: MCP_TOOLS.map((t) => ({ name: t.name, description: t.description, annotations: t.annotations })),
       resources: MCP_RESOURCES.map((r) => ({ uri: r.uri, name: r.name })),
+      resourceTemplates: MCP_RESOURCE_TEMPLATES.map((t) => ({ uriTemplate: t.uriTemplate, name: t.name })),
       prompts: MCP_PROMPTS.map((p) => ({ name: p.name, description: p.description })),
     });
   };

@@ -12,28 +12,28 @@ export function WukongBrandMark({
   const dims =
     size === 'xl'
       ? {
-          box: 'w-20 h-20 sm:w-28 sm:h-28 rounded-2xl',
-          badge: 'w-9 h-9 sm:w-10 sm:h-10 -right-2 -bottom-2 sm:-right-2.5 sm:-bottom-2.5 rounded-xl border-[3px]',
+          box: 'w-24 h-24 sm:w-28 sm:h-28 rounded-full',
+          badge: 'w-9 h-9 sm:w-10 sm:h-10 right-0 bottom-0 rounded-full border-[3px]',
           arrow: 'w-4 h-4 sm:w-5 sm:h-5',
           crownRing: 'p-[2px]',
         }
       : size === 'lg'
         ? {
-            box: 'w-14 h-14 rounded-xl',
-            badge: 'w-6 h-6 -right-1.5 -bottom-1.5 rounded-lg border-2',
+            box: 'w-14 h-14 rounded-full',
+            badge: 'w-6 h-6 -right-0.5 -bottom-0.5 rounded-full border-2',
             arrow: 'w-3.5 h-3.5',
             crownRing: 'p-[1.5px]',
           }
         : size === 'md'
           ? {
-              box: 'w-12 h-12 rounded-xl',
-              badge: 'w-5 h-5 -right-1 -bottom-1 rounded-md border-2',
+              box: 'w-14 h-14 rounded-full',
+              badge: 'w-6 h-6 -right-0.5 -bottom-0.5 rounded-full border-2',
               arrow: 'w-3 h-3',
               crownRing: 'p-[1.5px]',
             }
           : {
-              box: 'w-9 h-9 rounded-lg',
-              badge: 'w-4 h-4 -right-1 -bottom-1 rounded-[5px] border-2',
+              box: 'w-9 h-9 rounded-full',
+              badge: 'w-4 h-4 -right-0.5 -bottom-0.5 rounded-full border-2',
               arrow: 'w-2.5 h-2.5',
               crownRing: 'p-[1px]',
             };
@@ -43,14 +43,14 @@ export function WukongBrandMark({
       {/* Soft Rose-Pink Moonlit Glow Halo */}
       <div
         aria-hidden="true"
-        className="pointer-events-none absolute -inset-1 rounded-[inherit] bg-gradient-to-br from-rose-500/30 via-pink-500/20 to-white/15 blur-md opacity-70 group-hover:opacity-100 transition-opacity"
+        className="pointer-events-none absolute -inset-1.5 rounded-full bg-gradient-to-br from-rose-500/35 via-pink-500/20 to-white/15 blur-md opacity-75 group-hover:opacity-100 transition-opacity"
       />
 
-      {/* Precision Beveled Rose-Pink & Pearl-White Metallic Frame */}
+      {/* Circular Celestial Rose-Pink & Pearl-White Metallic Rim */}
       <div
-        className={`relative w-full h-full rounded-[inherit] bg-gradient-to-br from-rose-300/70 via-pink-400/50 to-white/60 ${dims.crownRing} shadow-lg shadow-rose-950/70 transition-all group-hover:from-white/85 group-hover:via-pink-300 group-hover:to-rose-400`}
+        className={`relative w-full h-full rounded-full bg-gradient-to-br from-rose-300/75 via-pink-400/55 to-white/65 ${dims.crownRing} shadow-lg shadow-rose-950/70 transition-all group-hover:from-white/90 group-hover:via-pink-300 group-hover:to-rose-400`}
       >
-        <div className="relative w-full h-full rounded-[calc(inherit-2px)] bg-[#100612] overflow-hidden flex items-center justify-center">
+        <div className="relative w-full h-full rounded-full bg-[#100612] overflow-hidden flex items-center justify-center">
           <img
             src="/monkey-king-icon.jpg"
             alt="Sun Wukong emblem"
@@ -60,12 +60,12 @@ export function WukongBrandMark({
           {/* Subtle Top Moonlight Specular Sheen & Rim Vignette */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-gradient-to-b from-white/15 via-transparent to-[#09030B]/70 shadow-[inset_0_0_12px_rgba(8,3,10,0.85)]"
+            className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-b from-white/15 via-transparent to-[#09030B]/70 shadow-[inset_0_0_12px_rgba(8,3,10,0.85)]"
           />
         </div>
       </div>
 
-      {/* Sculpted Jewel-Tone Download Crest Badge */}
+      {/* Circular Orbital Download Emblem */}
       {showDownloadBadge && (
         <span
           aria-hidden="true"

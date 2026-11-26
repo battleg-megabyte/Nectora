@@ -111,7 +111,7 @@ export function DownloadHistory({
             role="dialog"
             aria-modal="true"
             aria-label="Download History"
-            className="relative w-full max-w-2xl max-h-[90dvh] sm:max-h-[88dvh] wk-box rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            className="relative w-full max-w-2xl max-h-[90dvh] sm:max-h-[88dvh] wk-sheet rounded-t-[36px] sm:rounded-[32px] shadow-2xl flex flex-col overflow-hidden"
           >
             {/* Mobile Sheet Handle */}
             <div className="sm:hidden pt-3 pb-1 flex justify-center">
@@ -119,11 +119,9 @@ export function DownloadHistory({
             </div>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-rose-300/15 bg-[#0D060C]">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-rose-300/15">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-400/35 flex items-center justify-center shrink-0">
-                  <History className="w-4 h-4" />
-                </div>
+                <History className="w-5 h-5 text-rose-400 shrink-0" />
                 <div className="min-w-0">
                   <h3 className="font-display font-semibold text-base text-white truncate">
                     Download History
@@ -137,7 +135,7 @@ export function DownloadHistory({
                 type="button"
                 onClick={onClose}
                 aria-label="Close history"
-                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -150,7 +148,7 @@ export function DownloadHistory({
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="p-4 border-b border-rose-300/15 bg-[#090409] space-y-3 overflow-hidden"
+                  className="p-5 border-b border-rose-300/15 bg-black/30 space-y-3 overflow-hidden"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -167,7 +165,7 @@ export function DownloadHistory({
                         href={activePlayerItem.src}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-xs text-white transition-colors"
+                        className="flex items-center gap-1 px-3.5 min-h-[36px] rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-rose-300/20 text-xs text-white transition-colors"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>New Tab</span>
@@ -175,7 +173,7 @@ export function DownloadHistory({
                       <button
                         type="button"
                         onClick={() => setActivePlayerItem(null)}
-                        className="px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-xs text-white cursor-pointer"
+                        className="px-3.5 min-h-[36px] rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-rose-300/20 text-xs text-white cursor-pointer"
                       >
                         Close
                       </button>
@@ -183,12 +181,12 @@ export function DownloadHistory({
                   </div>
                   {activePlayerItem.item.format?.toLowerCase() === 'mp3' ||
                   activePlayerItem.item.format?.toLowerCase() === 'm4a' ? (
-                    <div className="p-4 rounded-xl bg-[#0D060C] border border-rose-300/20">
+                    <div className="py-3">
                       <audio
                         src={activePlayerItem.src}
                         controls
                         autoPlay
-                        className="w-full"
+                        className="w-full rounded-full"
                       />
                     </div>
                   ) : (
@@ -197,7 +195,7 @@ export function DownloadHistory({
                       controls
                       autoPlay
                       playsInline
-                      className="w-full max-h-[220px] sm:max-h-[240px] rounded-xl bg-black object-contain border border-rose-300/15"
+                      className="w-full max-h-[220px] sm:max-h-[240px] rounded-[24px] bg-black object-contain border border-rose-300/15"
                     />
                   )}
                 </motion.div>
@@ -205,16 +203,16 @@ export function DownloadHistory({
             </AnimatePresence>
 
             {/* Search & Filters */}
-            <div className="p-4 border-b border-rose-300/15 bg-[#0D060C] space-y-3">
+            <div className="px-5 sm:px-6 pt-4 pb-2 border-b border-rose-300/15 space-y-3">
               <div className="flex items-center gap-2">
                 <div className="relative flex-1 min-w-0">
-                  <Search className="w-4 h-4 text-rose-100/50 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <Search className="w-4 h-4 text-rose-100/50 absolute left-3.5 top-1/2 -translate-y-1/2" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Filter by title, resolution, or source..."
-                    className="w-full min-h-[40px] bg-[#090409] border border-rose-300/20 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-rose-100/40 focus:outline-none focus:border-rose-400"
+                    className="w-full min-h-[40px] bg-white/[0.05] border border-rose-300/20 rounded-full pl-10 pr-4 py-2 text-xs text-white placeholder-rose-100/40 focus:outline-none focus:border-rose-400"
                   />
                 </div>
 
@@ -223,7 +221,7 @@ export function DownloadHistory({
                     <button
                       type="button"
                       onClick={exportJson}
-                      className="flex items-center gap-1.5 px-3 min-h-[40px] rounded-lg text-xs font-medium bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 transition-colors whitespace-nowrap cursor-pointer"
+                      className="flex items-center gap-1.5 px-3.5 min-h-[40px] rounded-full text-xs font-medium bg-white/[0.05] hover:bg-white/[0.10] text-white border border-rose-300/20 transition-colors whitespace-nowrap cursor-pointer"
                       title="Export JSON"
                     >
                       <FileDown className="w-3.5 h-3.5 text-rose-400" />
@@ -233,7 +231,7 @@ export function DownloadHistory({
                     <button
                       type="button"
                       onClick={onClearHistory}
-                      className="flex items-center gap-1.5 px-3 min-h-[40px] rounded-lg text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/30 transition-colors whitespace-nowrap cursor-pointer"
+                      className="flex items-center gap-1.5 px-3.5 min-h-[40px] rounded-full text-xs font-medium bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-400/30 transition-colors whitespace-nowrap cursor-pointer"
                       title="Clear all history"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -244,7 +242,7 @@ export function DownloadHistory({
               </div>
 
               {history.length > 0 && (
-                <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+                <div className="flex items-center gap-5 overflow-x-auto pb-0.5">
                   {['all', 'tiktok', 'instagram', 'facebook', 'direct'].map((plat) => {
                     const active = platformFilter === plat;
                     return (
@@ -252,18 +250,18 @@ export function DownloadHistory({
                         key={plat}
                         type="button"
                         onClick={() => setPlatformFilter(plat)}
-                        className={`relative px-3 min-h-[34px] rounded-md text-xs font-medium capitalize transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                          active ? 'text-white' : 'text-rose-100/60 hover:text-white'
+                        className={`relative py-2 text-xs font-medium capitalize transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                          active ? 'text-white font-semibold' : 'text-rose-100/55 hover:text-white'
                         }`}
                       >
+                        <span>{plat}</span>
                         {active && (
                           <motion.span
-                            layoutId="history-filter-pill"
+                            layoutId="history-filter-underline"
                             transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-                            className="absolute inset-0 rounded-md bg-gradient-to-r from-rose-500 to-pink-500 border border-white/25"
+                            className="absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-rose-400 to-pink-400 rounded-full"
                           />
                         )}
-                        <span className="relative z-10">{plat}</span>
                       </button>
                     );
                   })}
@@ -271,8 +269,8 @@ export function DownloadHistory({
               )}
             </div>
 
-            {/* Records List */}
-            <div className="p-4 pb-safe overflow-y-auto flex-1">
+            {/* Open Hairline Records List */}
+            <div className="px-5 sm:px-6 pb-safe overflow-y-auto flex-1">
               {filtered.length === 0 ? (
                 <div className="text-center py-12 text-rose-100/60 space-y-1.5">
                   <History className="w-8 h-8 mx-auto text-rose-300/35" />
@@ -284,7 +282,7 @@ export function DownloadHistory({
                   </p>
                 </div>
               ) : (
-                <div className="rounded-xl border border-rose-300/20 divide-y divide-rose-300/15 bg-[#0D060C]">
+                <div className="divide-y divide-rose-300/15">
                   {filtered.map((item) => {
                     const hasLocalBlob = Boolean(downloadedBlobs[item.url]);
                     const fmtLower = item.format?.toLowerCase();
@@ -292,7 +290,7 @@ export function DownloadHistory({
                     return (
                       <div
                         key={item.id}
-                        className="flex flex-col sm:flex-row sm:items-center justify-between px-4 py-3 hover:bg-rose-400/[0.04] transition-colors gap-3"
+                        className="flex flex-col sm:flex-row sm:items-center justify-between py-3.5 hover:bg-rose-400/[0.04] transition-colors gap-3"
                       >
                         <div className="flex items-center gap-3 min-w-0">
                           <div className="flex items-center justify-center shrink-0">
@@ -320,14 +318,14 @@ export function DownloadHistory({
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 shrink-0 pl-11 sm:pl-0">
+                        <div className="flex items-center gap-2 shrink-0 pl-10 sm:pl-0">
                           <button
                             type="button"
                             onClick={() => handleOpenItemPlayer(item)}
-                            className={`flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
+                            className={`flex items-center gap-1.5 px-3.5 min-h-[38px] rounded-full text-xs font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                               hasLocalBlob
                                 ? 'bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25'
-                                : 'bg-[#140A13] hover:bg-rose-500 text-white border border-rose-300/20'
+                                : 'bg-white/[0.06] hover:bg-rose-500 text-white border border-rose-300/20'
                             }`}
                           >
                             <Play className="w-3 h-3 fill-current" />
@@ -345,7 +343,7 @@ export function DownloadHistory({
                           <a
                             href={`/api/download?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(item.title)}_${item.resolution}.${item.format}&format=${item.format}`}
                             download
-                            className="min-w-[38px] min-h-[38px] flex items-center justify-center rounded-lg bg-[#140A13] hover:bg-[#221020] text-white/80 hover:text-white border border-rose-300/20 transition-colors"
+                            className="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-white/[0.12] text-white/80 hover:text-white border border-rose-300/20 transition-colors"
                             title="Download again"
                             aria-label="Download again"
                           >
@@ -355,7 +353,7 @@ export function DownloadHistory({
                           <button
                             type="button"
                             onClick={() => onDeleteItem(item.id)}
-                            className="min-w-[38px] min-h-[38px] flex items-center justify-center rounded-lg bg-[#140A13] hover:bg-red-500/15 text-rose-100/50 hover:text-red-400 border border-rose-300/20 transition-colors cursor-pointer"
+                            className="w-9 h-9 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-red-500/15 text-rose-100/50 hover:text-red-400 border border-rose-300/20 transition-colors cursor-pointer"
                             title="Remove from history"
                             aria-label="Remove from history"
                           >

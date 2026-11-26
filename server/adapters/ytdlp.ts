@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { AdapterResult, MediaMetadata, PlatformType, QualityOption } from '../types.js';
 import { formatBytes, formatDuration } from './base.js';
-import { getPlatformSecurityCookies } from '../security.js';
+import { getPlatformSecurityCookies, sanitizeHttpUrl } from '../security.js';
 
 function getYtDlpPath(): string {
   const localBin = path.join(process.cwd(), 'bin', 'yt-dlp');
@@ -203,10 +203,12 @@ export function extractWithYtDlp(
                 format: 'mp4',
                 url: f.url,
                 audioUrl: needsAudioMux ? bestAudioUrl : undefined,
-                isNative: qualities.length === 0,
+                isNative: true,
+                width: typeof f.width === 'number' ? f.width : undefined,
+                height: typeof f.height === 'number' ? f.height : tier.min,
                 fileSizeBytes: totalBytes > 0 ? totalBytes : undefined,
                 fileSizeFormatted: totalBytes > 0 ? formatBytes(totalBytes) : undefined,
-                hasAudio: true,
+                hasAudio: f.acodec !== 'none' || Boolean(bestAudioUrl),
                 fps: f.fps,
               });
             }
@@ -214,19 +216,27 @@ export function extractWithYtDlp(
 
           const rootVideoUrl = info.url || (videoFormats[0] && videoFormats[0].url);
           if (qualities.length === 0 && rootVideoUrl) {
+            const rootH = typeof info.height === 'number' ? info.height : 720;
+            const rootRes = rootH >= 1080 ? '1080p' : rootH >= 720 ? '720p' : rootH >= 480 ? '480p' : '360p';
             qualities.push({
-              id: '720p',
-              label: 'HD Video Stream (Direct)',
-              resolution: '720p',
+              id: rootRes,
+              label: `${rootRes} Video Stream (Direct)`,
+              resolution: rootRes,
               format: 'mp4',
               url: rootVideoUrl,
               audioUrl: bestAudioUrl,
               isNative: true,
+              height: rootH,
               fileSizeBytes: info.filesize || info.filesize_approx,
               fileSizeFormatted: formatBytes(info.filesize || info.filesize_approx),
               hasAudio: true,
             });
           }
+
+          const progressiveFallbackUrl =
+            qualities.find((q) => !q.audioUrl && q.hasAudio !== false)?.url ||
+            rootVideoUrl ||
+            qualities[0]?.url;
 
           if (bestAudio && bestAudio.url) {
             qualities.push({
@@ -235,18 +245,19 @@ export function extractWithYtDlp(
               resolution: 'audio',
               format: 'mp3',
               url: bestAudio.url,
+              audioUrl: progressiveFallbackUrl && progressiveFallbackUrl !== bestAudio.url ? progressiveFallbackUrl : undefined,
               isNative: true,
               fileSizeBytes: bestAudioBytes > 0 ? bestAudioBytes : undefined,
               fileSizeFormatted: bestAudioBytes > 0 ? formatBytes(bestAudioBytes) : undefined,
               hasAudio: true,
             });
-          } else if (rootVideoUrl) {
+          } else if (progressiveFallbackUrl) {
             qualities.push({
               id: 'audio',
               label: 'Audio Track (MP3)',
               resolution: 'audio',
               format: 'mp3',
-              url: rootVideoUrl,
+              url: progressiveFallbackUrl,
               isNative: true,
               hasAudio: true,
             });
@@ -268,12 +279,12 @@ export function extractWithYtDlp(
             author: {
               name: authorName,
               username: authorUsername,
-              profileUrl: authorProfileUrl,
+              profileUrl: sanitizeHttpUrl(authorProfileUrl) || undefined,
             },
-            thumbnailUrl: thumbnail,
+            thumbnailUrl: sanitizeHttpUrl(thumbnail),
             durationSeconds: duration,
             durationFormatted: formatDuration(duration),
-            qualities,
+            qualities: qualities.filter((q) => Boolean(sanitizeHttpUrl(q.url))),
             extractedAt: new Date().toISOString(),
             sourceType: 'video',
           };

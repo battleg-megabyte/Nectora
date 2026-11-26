@@ -193,7 +193,7 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
           {/* Subtle Atmospheric Pink Moon Corona & Cloud Horizon Contrast Scrim */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_52%_44%,rgba(244,63,94,0.10)_0%,rgba(12,4,14,0.48)_48%,rgba(5,2,7,0.88)_100%)]"
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_52%_44%,rgba(244,63,94,0.12)_0%,rgba(12,4,14,0.50)_48%,rgba(5,2,7,0.88)_100%)]"
           />
 
           {/* Slow Drifting Rose Mist Across Bottom Cloud Sea */}
@@ -214,7 +214,7 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
               initial={{ scale: 0.72, opacity: 0, rotate: -18 }}
               animate={{ scale: 1, opacity: 1, rotate: 0 }}
               transition={{ duration: 1.05, delay: 0.12, ease: [0.16, 1, 0.3, 1] }}
-              className="relative w-64 h-64 sm:w-[340px] sm:h-[340px] rounded-full border border-rose-300/25 shadow-[0_0_90px_-10px_rgba(244,63,94,0.42)]"
+              className="relative w-72 h-72 sm:w-[360px] sm:h-[360px] rounded-full border border-rose-300/25 shadow-[0_0_90px_-10px_rgba(244,63,94,0.42)]"
             >
               {/* Inner dashed lunar hairline ring */}
               <motion.div
@@ -248,15 +248,15 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
             />
           ))}
 
-          {/* Top Bar: Sound Control & Skip */}
+          {/* Top Bar: Fluid Rounded-Full Sound & Skip Controls */}
           <button
             type="button"
             onClick={handleToggleSound}
             aria-label={soundMuted ? 'Enable intro sound' : 'Mute intro sound'}
-            className={`absolute top-5 left-5 sm:top-8 sm:left-8 z-30 flex items-center gap-1.5 px-3.5 min-h-[40px] rounded-lg text-xs font-semibold transition-all cursor-pointer border backdrop-blur-md ${
+            className={`absolute top-5 left-5 sm:top-8 sm:left-8 z-30 flex items-center gap-1.5 px-4 min-h-[40px] rounded-full text-xs font-semibold transition-all cursor-pointer border backdrop-blur-md ${
               autoplayBlocked && !soundMuted
-                ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white border-white/45 shadow-lg shadow-rose-950/70 animate-pulse'
-                : 'text-white bg-[#140A14]/75 border-rose-300/30 hover:border-pink-400/70'
+                ? 'bg-gradient-to-r from-rose-500 to-pink-500 text-white border-white/50 ring-2 ring-white/40 shadow-lg shadow-rose-950/70'
+                : 'text-white bg-[#140A14]/70 border-rose-300/25 hover:border-pink-400/70'
             }`}
           >
             {soundMuted ? (
@@ -274,48 +274,53 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
               stopWelcomeSound();
               onCompleteRef.current();
             }}
-            className="absolute top-5 right-5 sm:top-8 sm:right-8 z-30 px-4 min-h-[40px] rounded-lg text-xs font-semibold text-white bg-[#140A14]/75 backdrop-blur-md border border-rose-300/30 hover:border-white/60 transition-colors cursor-pointer"
+            className="absolute top-5 right-5 sm:top-8 sm:right-8 z-30 px-4 min-h-[40px] rounded-full text-xs font-semibold text-white bg-[#140A14]/70 backdrop-blur-md border border-rose-300/25 hover:border-white/60 transition-colors cursor-pointer"
           >
             Skip
           </button>
 
-          {/* Center Lunar Crest & Typography — Open Soft Radial Halo so Pink Moon Shines Behind */}
-          <div className="relative z-20 flex flex-col items-center text-center max-w-md w-full px-6 py-7 rounded-2xl bg-[radial-gradient(ellipse_at_center,rgba(8,3,11,0.74)_0%,rgba(8,3,11,0.44)_64%,rgba(8,3,11,0.12)_100%)]">
+          {/* Center Circular Lunar Crest & Typography — Pure Open Radial Aura (Zero Rectangle Box) */}
+          <div className="relative z-20 flex flex-col items-center text-center max-w-md w-full px-6 py-8">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_center,rgba(8,3,11,0.72)_0%,rgba(8,3,11,0.34)_56%,transparent_80%)]"
+            />
+
             {/* Soft Pink Lunar Corona Behind Crest */}
             <motion.div
               aria-hidden="true"
               initial={{ opacity: 0, scale: 0.7 }}
-              animate={{ opacity: [0.4, 0.75, 0.55], scale: [0.95, 1.08, 1] }}
+              animate={{ opacity: [0.4, 0.78, 0.55], scale: [0.95, 1.08, 1] }}
               transition={{ duration: 2.6, repeat: Infinity, repeatType: 'mirror', ease: 'easeInOut' }}
-              className="pointer-events-none absolute top-4 w-36 h-36 rounded-full bg-rose-500/25 blur-2xl"
+              className="pointer-events-none absolute top-4 w-40 h-40 rounded-full bg-rose-500/25 blur-2xl"
             />
 
-            {/* Framed Sun Wukong Emblem + Docking Video Download Reticle */}
+            {/* Circular Sun Wukong Medallion + Docking Circular Download Orb */}
             <div className="relative flex items-center justify-center">
               <motion.div
                 initial={{ opacity: 0, scale: 0.78, y: 16 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 transition={{ duration: 0.6, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
-                className="relative"
+                className="relative overflow-hidden rounded-full"
               >
                 <WukongBrandMark size="xl" showDownloadBadge={false} />
 
-                {/* Clean Diagonal Moonbeam Gloss Sweep */}
+                {/* Circular Diagonal Moonbeam Gloss Sweep */}
                 <motion.div
                   aria-hidden="true"
                   initial={{ x: '-130%' }}
                   animate={{ x: '230%' }}
                   transition={{ duration: 0.85, delay: 0.78, ease: [0.22, 1, 0.36, 1] }}
-                  className="pointer-events-none absolute inset-y-0 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/35 to-transparent overflow-hidden rounded-2xl"
+                  className="pointer-events-none absolute inset-y-0 w-1/3 -skew-x-12 bg-gradient-to-r from-transparent via-white/35 to-transparent"
                 />
               </motion.div>
 
-              {/* Rose-Pink Video Download Reticle Locking Into Corner */}
+              {/* Circular Orbital Rose-Pink Download Crest Locking Into Corner */}
               <motion.div
                 initial={{ opacity: 0, x: 22, y: -18, scale: 0.65 }}
                 animate={{ opacity: 1, x: 0, y: 0, scale: 1 }}
                 transition={{ duration: 0.45, delay: 0.58, ease: [0.16, 1, 0.3, 1] }}
-                className="absolute -bottom-2 -right-2 sm:-bottom-2.5 sm:-right-2.5 w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-rose-500 via-pink-500 to-rose-600 border-[3px] border-[#09030B] flex items-center justify-center text-white shadow-lg shadow-rose-950/90 ring-1 ring-white/50"
+                className="absolute -bottom-1 -right-1 w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-gradient-to-br from-rose-500 via-pink-500 to-rose-600 border-[3px] border-[#09030B] flex items-center justify-center text-white shadow-lg shadow-rose-950/90 ring-1 ring-white/50"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -343,7 +348,7 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
             </div>
 
             {/* Wordmark Lockup */}
-            <div className="mt-6 sm:mt-7 overflow-hidden">
+            <div className="relative mt-6 sm:mt-7 overflow-hidden">
               <motion.h2
                 initial={{ opacity: 0, y: 18 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -359,7 +364,7 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.4, delay: 0.96 }}
-              className="mt-2 text-xs sm:text-sm text-white/90 drop-shadow-[0_1px_8px_rgba(0,0,0,0.85)]"
+              className="relative mt-2 text-xs sm:text-sm text-white/90 drop-shadow-[0_1px_8px_rgba(0,0,0,0.85)]"
             >
               Original-quality MP4, MP3 &amp; M4A stream extractor
             </motion.p>
@@ -370,14 +375,14 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
               initial={{ scaleX: 0, opacity: 0 }}
               animate={{ scaleX: 1, opacity: 1 }}
               transition={{ duration: 0.48, delay: 1.12, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-4 sm:mt-5 w-32 h-px bg-gradient-to-r from-transparent via-rose-300/65 to-transparent"
+              className="relative mt-4 sm:mt-5 w-32 h-px bg-gradient-to-r from-transparent via-rose-300/65 to-transparent"
             />
 
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, delay: 1.25, ease: [0.16, 1, 0.3, 1] }}
-              className="mt-3 sm:mt-3.5 flex items-baseline justify-center gap-2 drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]"
+              className="relative mt-3 sm:mt-3.5 flex items-baseline justify-center gap-2 drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]"
             >
               <span className="text-xs font-medium tracking-wide text-white">
                 Made by
@@ -388,7 +393,7 @@ export function OpeningSplash({ isOpen, onComplete }: OpeningSplashProps) {
             </motion.div>
 
             {/* Synced Progress Rail matching 3.04s welcome1 WAV */}
-            <div className="mt-6 sm:mt-7 w-48 sm:w-56 space-y-2">
+            <div className="relative mt-6 sm:mt-7 w-48 sm:w-56 space-y-2">
               <div className="w-full h-[3px] rounded-full bg-white/15 overflow-hidden">
                 <motion.div
                   initial={{ scaleX: 0 }}

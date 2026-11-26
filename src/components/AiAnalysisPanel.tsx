@@ -82,7 +82,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
       const data = await res.json();
       setDeepAnalysis(data);
     } catch (e: any) {
-      setDeepError(e?.message || 'Unable to run video intelligence.');
+      setDeepError(e?.message || 'Unable to complete media analysis.');
     } finally {
       setLoadingDeep(false);
     }
@@ -196,20 +196,20 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
+          transition={{ duration: 0.16 }}
           onClick={onClose}
           className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-black/80 backdrop-blur-md"
         >
           <motion.div
-            initial={{ opacity: 0, y: 28 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 20 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             onClick={(e) => e.stopPropagation()}
             role="dialog"
             aria-modal="true"
             aria-label="Media Insights"
-            className="relative w-full max-w-3xl max-h-[90dvh] sm:max-h-[88dvh] wk-box rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            className="relative w-full max-w-3xl max-h-[90dvh] sm:max-h-[88dvh] wk-sheet rounded-t-[36px] sm:rounded-[32px] shadow-2xl flex flex-col overflow-hidden"
           >
             {/* Mobile Sheet Handle */}
             <div className="sm:hidden pt-3 pb-1 flex justify-center">
@@ -217,11 +217,9 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
             </div>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-rose-300/15 bg-[#0D060C]">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-rose-300/15">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-400/35 flex items-center justify-center shrink-0">
-                  <ScanSearch className="w-4 h-4" />
-                </div>
+                <ScanSearch className="w-5 h-5 text-rose-400 shrink-0" />
                 <div className="min-w-0">
                   <h3 className="font-display font-semibold text-base text-white truncate">
                     Media Insights
@@ -233,14 +231,14 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                 type="button"
                 onClick={onClose}
                 aria-label="Close panel"
-                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Animated Tab Switcher */}
-            <div className="flex items-center gap-1 px-4 sm:px-6 py-2.5 border-b border-rose-300/15 bg-[#0D060C] overflow-x-auto">
+            {/* Clean Underline Tabs */}
+            <div className="flex items-center gap-6 px-5 sm:px-6 border-b border-rose-300/15 overflow-x-auto">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const active = activeTab === tab.id;
@@ -252,26 +250,26 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                       setActiveTab(tab.id);
                       tab.onEnter();
                     }}
-                    className={`relative flex items-center gap-1.5 px-3.5 min-h-[38px] rounded-lg text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
-                      active ? 'text-white' : 'text-rose-100/60 hover:text-white'
+                    className={`relative flex items-center gap-1.5 py-3 text-xs font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      active ? 'text-white' : 'text-rose-100/55 hover:text-white'
                     }`}
                   >
+                    <Icon className={`w-3.5 h-3.5 ${active ? 'text-rose-400' : ''}`} />
+                    <span>{tab.label}</span>
                     {active && (
                       <motion.span
-                        layoutId="ai-panel-tab"
+                        layoutId="ai-panel-underline"
                         transition={{ type: 'spring', stiffness: 450, damping: 34 }}
-                        className="absolute inset-0 rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 border border-white/25"
+                        className="absolute inset-x-0 bottom-0 h-0.5 bg-gradient-to-r from-rose-400 to-pink-400 rounded-full"
                       />
                     )}
-                    <Icon className="relative z-10 w-3.5 h-3.5" />
-                    <span className="relative z-10">{tab.label}</span>
                   </button>
                 );
               })}
             </div>
 
             {/* Body */}
-            <div className="p-4 sm:p-6 pb-safe overflow-y-auto space-y-6 flex-1">
+            <div className="p-5 sm:p-6 pb-safe overflow-y-auto space-y-6 flex-1">
               {activeTab === 'deep' && (
                 <div>
                   {loadingDeep && (
@@ -282,7 +280,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                   )}
 
                   {deepError && !loadingDeep && (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-4">
+                    <div className="px-1 py-3 border-t border-b border-red-400/30 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-2.5 text-xs text-red-200">
                         <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                         <span>{deepError}</span>
@@ -290,7 +288,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                       <button
                         type="button"
                         onClick={runDeepAnalysis}
-                        className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-white text-xs font-medium shrink-0 cursor-pointer"
+                        className="flex items-center gap-1.5 text-white hover:text-rose-300 text-xs font-medium shrink-0 cursor-pointer"
                       >
                         <RotateCw className="w-3.5 h-3.5" />
                         <span>Retry</span>
@@ -300,7 +298,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
 
                   {deepAnalysis && !loadingDeep && (
                     <motion.div
-                      initial={{ opacity: 0, y: 8 }}
+                      initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="space-y-6"
                     >
@@ -330,14 +328,14 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                         </div>
                       </div>
 
-                      <div className="space-y-3">
+                      <div className="space-y-2">
                         <div className="flex items-center gap-2 text-xs font-medium text-rose-100/70">
                           <Clock className="w-3.5 h-3.5 text-rose-400" />
                           <span>Key Moments</span>
                         </div>
-                        <div className="rounded-xl border border-rose-300/20 divide-y divide-rose-300/15 bg-[#0D060C]">
+                        <div className="divide-y divide-rose-300/15">
                           {deepAnalysis.keyMoments.map((moment, idx) => (
-                            <div key={idx} className="flex items-start gap-4 px-4 py-3 text-xs">
+                            <div key={idx} className="flex items-start gap-4 py-2.5 text-xs">
                               <span className="font-mono font-semibold text-pink-400 tabular-nums shrink-0">
                                 {moment.timestamp}
                               </span>
@@ -349,21 +347,21 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                         </div>
                       </div>
 
-                      <div className="space-y-3">
+                      <div className="space-y-2 pt-2 border-t border-rose-300/15">
                         <span className="text-xs font-medium text-rose-100/70 block">
                           Repost Captions
                         </span>
-                        <div className="rounded-xl border border-rose-300/20 divide-y divide-rose-300/15 bg-[#0D060C]">
+                        <div className="divide-y divide-rose-300/15">
                           {deepAnalysis.suggestedCaptions.map((caption, idx) => (
                             <div
                               key={idx}
-                              className="flex items-center justify-between gap-4 px-4 py-3 text-xs text-white/90"
+                              className="flex items-center justify-between gap-4 py-2.5 text-xs text-white/90"
                             >
                               <span className="leading-relaxed">{caption}</span>
                               <button
                                 type="button"
                                 onClick={() => copyCaption(caption, idx)}
-                                className="min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-white transition-colors shrink-0 cursor-pointer"
+                                className="w-8 h-8 rounded-full flex items-center justify-center text-rose-200/75 hover:text-white hover:bg-white/[0.06] transition-colors shrink-0 cursor-pointer"
                                 title="Copy caption"
                                 aria-label="Copy caption"
                               >
@@ -392,7 +390,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                   )}
 
                   {fastError && !loadingFast && (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-4">
+                    <div className="px-1 py-3 border-t border-b border-red-400/30 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-2.5 text-xs text-red-200">
                         <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                         <span>{fastError}</span>
@@ -400,7 +398,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                       <button
                         type="button"
                         onClick={runFastTags}
-                        className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-white text-xs font-medium shrink-0 cursor-pointer"
+                        className="flex items-center gap-1.5 text-white hover:text-rose-300 text-xs font-medium shrink-0 cursor-pointer"
                       >
                         <RotateCw className="w-3.5 h-3.5" />
                         <span>Retry</span>
@@ -410,7 +408,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
 
                   {fastTags && !loadingFast && (
                     <motion.div
-                      initial={{ opacity: 0, y: 8 }}
+                      initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="space-y-6"
                     >
@@ -433,7 +431,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                           <button
                             type="button"
                             onClick={() => copyAllHashtags(fastTags.hashtags)}
-                            className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-[#0D060C] hover:bg-[#221020] border border-rose-300/20 text-xs font-medium text-rose-200 transition-colors cursor-pointer"
+                            className="flex items-center gap-1.5 py-1 text-xs font-medium text-rose-200 hover:text-white transition-colors cursor-pointer"
                           >
                             {copiedHashtags ? (
                               <Check className="w-3.5 h-3.5 text-emerald-400" />
@@ -444,7 +442,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                           </button>
                         </div>
 
-                        <div className="flex flex-wrap gap-2">
+                        <div className="flex flex-wrap gap-x-4 gap-y-2">
                           {fastTags.hashtags.map((tag, idx) => {
                             const formatted = tag.startsWith('#') ? tag : `#${tag}`;
                             const isCopied = copiedSingleTag === tag;
@@ -453,7 +451,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                                 key={idx}
                                 type="button"
                                 onClick={() => copyTag(tag)}
-                                className="px-3 min-h-[34px] rounded-md text-xs font-mono bg-[#0D060C] hover:bg-[#221020] text-white/90 hover:text-rose-300 border border-rose-300/20 transition-colors cursor-pointer"
+                                className="py-1 text-xs font-mono text-rose-200/90 hover:text-white underline decoration-rose-400/25 underline-offset-4 hover:decoration-pink-400 transition-colors cursor-pointer"
                               >
                                 {isCopied ? 'Copied!' : formatted}
                               </button>
@@ -476,7 +474,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                   )}
 
                   {searchError && !loadingSearch && (
-                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex items-center justify-between gap-4">
+                    <div className="px-1 py-3 border-t border-b border-red-400/30 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-2.5 text-xs text-red-200">
                         <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
                         <span>{searchError}</span>
@@ -484,7 +482,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                       <button
                         type="button"
                         onClick={runSearchContext}
-                        className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-white text-xs font-medium shrink-0 cursor-pointer"
+                        className="flex items-center gap-1.5 text-white hover:text-rose-300 text-xs font-medium shrink-0 cursor-pointer"
                       >
                         <RotateCw className="w-3.5 h-3.5" />
                         <span>Retry</span>
@@ -494,7 +492,7 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
 
                   {searchContext && !loadingSearch && (
                     <motion.div
-                      initial={{ opacity: 0, y: 8 }}
+                      initial={{ opacity: 0, y: 6 }}
                       animate={{ opacity: 1, y: 0 }}
                       className="space-y-6"
                     >
@@ -506,18 +504,18 @@ export function AiAnalysisPanel({ media, isOpen, onClose }: AiAnalysisPanelProps
                       </div>
 
                       {searchContext.sourceReferences.length > 0 && (
-                        <div className="space-y-3">
+                        <div className="space-y-2">
                           <span className="text-xs font-medium text-rose-100/70 block">
                             Citations ({searchContext.sourceReferences.length})
                           </span>
-                          <div className="rounded-xl border border-rose-300/20 divide-y divide-rose-300/15 bg-[#0D060C]">
+                          <div className="divide-y divide-rose-300/15">
                             {searchContext.sourceReferences.map((src, idx) => (
                               <a
                                 key={idx}
                                 href={src.url || '#'}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="flex items-center justify-between px-4 py-3 text-xs text-rose-200 hover:bg-rose-400/[0.05] transition-colors"
+                                className="flex items-center justify-between py-2.5 text-xs text-rose-200 hover:text-white transition-colors"
                               >
                                 <span className="truncate pr-3">{src.title}</span>
                                 <ExternalLink className="w-3.5 h-3.5 shrink-0 text-rose-100/45" />

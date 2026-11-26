@@ -96,17 +96,15 @@ export function SystemDiagnosticsModal({
             role="dialog"
             aria-modal="true"
             aria-label="Stream Check"
-            className="relative w-full max-w-2xl max-h-[90dvh] sm:max-h-[88dvh] wk-box rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            className="relative w-full max-w-2xl max-h-[90dvh] sm:max-h-[88dvh] wk-sheet rounded-t-[36px] sm:rounded-[32px] shadow-2xl flex flex-col overflow-hidden"
           >
             <div className="sm:hidden pt-3 pb-1 flex justify-center">
               <div className="w-10 h-1 rounded-full bg-rose-300/35" />
             </div>
 
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-rose-300/15 bg-[#0D060C]">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-rose-300/15">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-400/35 flex items-center justify-center shrink-0">
-                  <Activity className="w-4 h-4" />
-                </div>
+                <Activity className="w-5 h-5 text-rose-400 shrink-0" />
                 <div className="min-w-0">
                   <h3 className="font-display font-semibold text-base text-white truncate">
                     Stream &amp; Format Verification
@@ -120,14 +118,14 @@ export function SystemDiagnosticsModal({
                 type="button"
                 onClick={onClose}
                 aria-label="Close stream check"
-                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Summary Strip */}
-            <div className="grid grid-cols-3 divide-x divide-rose-300/15 border-b border-rose-300/15 bg-[#0D060C]">
+            <div className="grid grid-cols-3 divide-x divide-rose-300/15 border-b border-rose-300/15">
               <div className="px-2 sm:px-4 py-3 text-center">
                 <span className="text-[11px] text-rose-100/60 block">Stream Checks</span>
                 <span className="text-xs font-mono font-semibold text-emerald-400 mt-0.5 block tabular-nums">
@@ -152,7 +150,7 @@ export function SystemDiagnosticsModal({
               </div>
             </div>
 
-            <div className="p-4 sm:p-5 overflow-y-auto flex-1">
+            <div className="px-5 sm:px-6 overflow-y-auto flex-1">
               {loadingDownloads && (
                 <div className="flex flex-col items-center justify-center py-12 gap-2.5 text-rose-100/65">
                   <RefreshCw className="w-5 h-5 animate-spin text-rose-400" />
@@ -163,11 +161,11 @@ export function SystemDiagnosticsModal({
               )}
 
               {!loadingDownloads && downloadData && (
-                <div className="rounded-xl border border-rose-300/20 divide-y divide-rose-300/15 bg-[#0D060C]">
+                <div className="divide-y divide-rose-300/15">
                   {downloadData.results.map((t) => (
                     <div
                       key={t.id}
-                      className="flex items-start justify-between px-4 py-3 gap-4"
+                      className="flex items-start justify-between py-3.5 gap-4"
                     >
                       <div className="flex items-start gap-3 min-w-0">
                         {t.status === 'pass' ? (
@@ -207,7 +205,7 @@ export function SystemDiagnosticsModal({
               )}
             </div>
 
-            <div className="px-4 sm:px-6 py-4 pb-safe border-t border-rose-300/15 bg-[#0D060C] flex items-center justify-between gap-4">
+            <div className="px-5 sm:px-6 py-4 pb-safe border-t border-rose-300/15 flex items-center justify-between gap-4">
               <span className="text-[11px] text-rose-100/60 font-mono tabular-nums">
                 {downloadData?.timestamp
                   ? `Completed ${new Date(downloadData.timestamp).toLocaleTimeString()}`
@@ -217,7 +215,7 @@ export function SystemDiagnosticsModal({
                 type="button"
                 onClick={runDownloadTests}
                 disabled={loadingDownloads}
-                className="flex items-center gap-1.5 px-4 min-h-[40px] rounded-lg text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 disabled:opacity-40 transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-5 min-h-[40px] rounded-full text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 disabled:opacity-40 transition-colors cursor-pointer"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingDownloads ? 'animate-spin' : ''}`} />
                 <span>Re-run Stream Check</span>

@@ -46,7 +46,7 @@ export interface MediaMetadata {
   durationFormatted?: string;
   qualities: QualityOption[];
   extractedAt: string;
-  sourceType: 'video' | 'reel' | 'clip' | 'direct_stream';
+  sourceType: 'video' | 'reel' | 'clip' | 'direct_stream' | 'audio';
 }
 
 export interface AdapterResult {

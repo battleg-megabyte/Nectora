@@ -33,7 +33,7 @@ interface BatchDownloadModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectMedia: (media: MediaMetadata) => void;
-  preferredResolution?: '360p' | '480p' | '720p' | '1080p';
+  preferredResolution?: 'best' | 'mp3' | '360p' | '480p' | '720p' | '1080p';
   onSaveHistory?: (item: DownloadHistoryItem) => void;
   onRegisterBlob?: (streamUrl: string, blobUrl: string) => void;
 }
@@ -42,7 +42,7 @@ export function BatchDownloadModal({
   isOpen,
   onClose,
   onSelectMedia,
-  preferredResolution = '1080p',
+  preferredResolution = 'best',
   onSaveHistory,
   onRegisterBlob,
 }: BatchDownloadModalProps) {
@@ -103,35 +103,50 @@ export function BatchDownloadModal({
     setIsProcessing(true);
 
     const updated = [...items];
-    for (let i = 0; i < updated.length; i++) {
-      if (updated[i].status === 'ready') continue;
-      updated[i].status = 'analyzing';
-      setItems([...updated]);
+    const pendingIndices = updated
+      .map((item, index) => (item.status !== 'ready' ? index : -1))
+      .filter((index) => index !== -1);
 
-      try {
-        const res = await fetch('/api/analyze', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: updated[i].url }),
-        });
+    const concurrency = Math.min(3, Math.max(1, pendingIndices.length));
+    let cursor = 0;
 
-        if (res.ok) {
-          const data: MediaMetadata = await res.json();
-          updated[i].status = 'ready';
-          updated[i].media = data;
-        } else {
-          const errJson = await res.json().catch(() => ({}));
-          updated[i].status = 'error';
-          updated[i].error = errJson.error || 'Failed to extract media';
+    const runWorker = async () => {
+      while (cursor < pendingIndices.length) {
+        const index = pendingIndices[cursor++];
+        updated[index] = { ...updated[index], status: 'analyzing', error: undefined };
+        setItems([...updated]);
+
+        try {
+          const res = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: updated[index].url }),
+          });
+
+          if (res.ok) {
+            const data: MediaMetadata = await res.json();
+            updated[index] = { ...updated[index], status: 'ready', media: data };
+          } else {
+            const errJson = await res.json().catch(() => ({}));
+            updated[index] = {
+              ...updated[index],
+              status: 'error',
+              error: errJson.error || 'Failed to extract media',
+            };
+          }
+        } catch (err: any) {
+          updated[index] = {
+            ...updated[index],
+            status: 'error',
+            error: err?.message || 'Network error',
+          };
         }
-      } catch (err: any) {
-        updated[i].status = 'error';
-        updated[i].error = err?.message || 'Network error';
+
+        setItems([...updated]);
       }
+    };
 
-      setItems([...updated]);
-    }
-
+    await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
     setIsProcessing(false);
   };
 
@@ -152,11 +167,16 @@ export function BatchDownloadModal({
 
   const handleDownloadItem = async (itemId: string, media: MediaMetadata) => {
     const quality =
-      media.qualities.find((q) =>
-        q.resolution.toLowerCase().includes(preferredResolution.toLowerCase())
-      ) ||
-      media.qualities[0] ||
-      media.qualities[1];
+      preferredResolution === 'mp3'
+        ? media.qualities.find((q) => q.format === 'mp3' || q.format === 'm4a') ||
+          media.qualities[0]
+        : (preferredResolution !== 'best'
+            ? media.qualities.find((q) =>
+                q.resolution.toLowerCase().includes(preferredResolution.toLowerCase())
+              )
+            : undefined) ||
+          media.qualities.find((q) => q.format !== 'mp3' && q.format !== 'm4a') ||
+          media.qualities[0];
     if (!quality) return;
 
     const existing = abortControllersRef.current.get(itemId);
@@ -359,7 +379,7 @@ export function BatchDownloadModal({
             role="dialog"
             aria-modal="true"
             aria-label="Batch URL Queue"
-            className="relative w-full max-w-3xl max-h-[90dvh] sm:max-h-[88dvh] wk-box rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            className="relative w-full max-w-3xl max-h-[90dvh] sm:max-h-[88dvh] wk-sheet rounded-t-[36px] sm:rounded-[32px] shadow-2xl flex flex-col overflow-hidden"
           >
             {/* Mobile Sheet Handle */}
             <div className="sm:hidden pt-3 pb-1 flex justify-center">
@@ -367,11 +387,9 @@ export function BatchDownloadModal({
             </div>
 
             {/* Header */}
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-rose-300/15 bg-[#0D060C]">
+            <div className="flex items-center justify-between px-5 sm:px-6 py-4 border-b border-rose-300/15">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="w-8 h-8 rounded-lg bg-rose-500/15 text-rose-400 border border-rose-400/35 flex items-center justify-center shrink-0">
-                  <Layers className="w-4 h-4" />
-                </div>
+                <Layers className="w-5 h-5 text-rose-400 shrink-0" />
                 <div className="min-w-0">
                   <h3 className="font-display font-semibold text-base text-white truncate">
                     Batch Extraction Queue
@@ -385,7 +403,7 @@ export function BatchDownloadModal({
                 type="button"
                 onClick={onClose}
                 aria-label="Close batch queue"
-                className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
+                className="w-9 h-9 rounded-full flex items-center justify-center text-rose-100/60 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -398,7 +416,7 @@ export function BatchDownloadModal({
                   initial={{ opacity: 0, height: 0 }}
                   animate={{ opacity: 1, height: 'auto' }}
                   exit={{ opacity: 0, height: 0 }}
-                  className="p-4 border-b border-rose-300/15 bg-[#090409] space-y-3 overflow-hidden"
+                  className="p-5 border-b border-rose-300/15 bg-black/30 space-y-3 overflow-hidden"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="min-w-0">
@@ -413,7 +431,7 @@ export function BatchDownloadModal({
                       <a
                         href={activeWatchItem.blobUrl}
                         download={`${activeWatchItem.title.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40) || 'wukong_vid'}_${activeWatchItem.resolution}.${activeWatchItem.format}`}
-                        className="flex items-center gap-1.5 px-3 min-h-[36px] rounded-lg bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 border border-white/25 text-xs font-semibold text-white transition-colors"
+                        className="flex items-center gap-1.5 px-3.5 min-h-[36px] rounded-full bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 border border-white/25 text-xs font-semibold text-white transition-colors"
                       >
                         <Download className="w-3.5 h-3.5" />
                         <span>Save</span>
@@ -422,7 +440,7 @@ export function BatchDownloadModal({
                         href={activeWatchItem.blobUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-xs text-white transition-colors"
+                        className="flex items-center gap-1 px-3.5 min-h-[36px] rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-rose-300/20 text-xs text-white transition-colors"
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                         <span>New Tab</span>
@@ -430,19 +448,19 @@ export function BatchDownloadModal({
                       <button
                         type="button"
                         onClick={() => setActiveWatchItem(null)}
-                        className="px-3 min-h-[36px] rounded-lg bg-[#140A13] hover:bg-[#221020] border border-rose-300/20 text-xs text-white cursor-pointer"
+                        className="px-3.5 min-h-[36px] rounded-full bg-white/[0.06] hover:bg-white/[0.12] border border-rose-300/20 text-xs text-white cursor-pointer"
                       >
                         Close
                       </button>
                     </div>
                   </div>
                   {activeWatchItem.format === 'mp3' || activeWatchItem.format === 'm4a' ? (
-                    <div className="p-4 rounded-xl bg-[#0D060C] border border-rose-300/20">
+                    <div className="py-3">
                       <audio
                         src={activeWatchItem.blobUrl}
                         controls
                         autoPlay
-                        className="w-full"
+                        className="w-full rounded-full"
                       />
                     </div>
                   ) : (
@@ -451,21 +469,21 @@ export function BatchDownloadModal({
                       controls
                       autoPlay
                       playsInline
-                      className="w-full max-h-[220px] sm:max-h-[240px] rounded-xl bg-black object-contain border border-rose-300/15"
+                      className="w-full max-h-[220px] sm:max-h-[240px] rounded-[24px] bg-black object-contain border border-rose-300/15"
                     />
                   )}
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* Input Area */}
-            <div className="p-4 sm:p-5 border-b border-rose-300/15 bg-[#0D060C] space-y-3">
+            {/* Open Input Area */}
+            <div className="p-5 sm:px-6 border-b border-rose-300/15 space-y-3">
               <textarea
                 value={rawText}
                 onChange={(e) => setRawText(e.target.value)}
                 placeholder="https://www.tiktok.com/@user/video/...&#10;https://www.instagram.com/reel/...&#10;https://example.com/video.mp4"
                 rows={3}
-                className="w-full bg-[#090409] border border-rose-300/20 rounded-lg p-3 text-xs text-white placeholder-rose-100/40 focus:outline-none focus:border-rose-400 font-mono"
+                className="w-full bg-white/[0.04] border border-rose-300/20 rounded-[24px] p-4 text-xs text-white placeholder-rose-100/40 focus:outline-none focus:border-rose-400 font-mono"
               />
 
               <div className="flex flex-wrap items-center justify-between gap-2.5">
@@ -474,7 +492,7 @@ export function BatchDownloadModal({
                     type="button"
                     onClick={handleParseUrls}
                     disabled={parsedUrlCount === 0 || isProcessing}
-                    className="px-4 min-h-[40px] rounded-lg text-xs font-semibold bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 disabled:opacity-40 transition-colors whitespace-nowrap cursor-pointer"
+                    className="px-4 min-h-[40px] rounded-full text-xs font-semibold bg-white/[0.06] hover:bg-white/[0.12] text-white border border-rose-300/20 disabled:opacity-40 transition-colors whitespace-nowrap cursor-pointer"
                   >
                     Load Queue ({parsedUrlCount})
                   </button>
@@ -499,7 +517,7 @@ export function BatchDownloadModal({
                         setRawText('');
                         setActiveWatchItem(null);
                       }}
-                      className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#140A13] hover:bg-red-500/15 text-rose-100/65 hover:text-red-400 border border-rose-300/20 transition-colors cursor-pointer"
+                      className="w-10 h-10 flex items-center justify-center rounded-full bg-white/[0.06] hover:bg-red-500/15 text-rose-100/65 hover:text-red-400 border border-rose-300/20 transition-colors cursor-pointer"
                       title="Clear queue"
                       aria-label="Clear queue"
                     >
@@ -510,7 +528,7 @@ export function BatchDownloadModal({
                       type="button"
                       onClick={handleStartBatchAnalysis}
                       disabled={isProcessing}
-                      className="flex items-center gap-1.5 px-4 min-h-[40px] rounded-lg text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 disabled:opacity-40 transition-colors whitespace-nowrap cursor-pointer"
+                      className="flex items-center gap-1.5 px-5 min-h-[40px] rounded-full text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 disabled:opacity-40 transition-colors whitespace-nowrap cursor-pointer"
                     >
                       {isProcessing ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -524,19 +542,19 @@ export function BatchDownloadModal({
               </div>
             </div>
 
-            {/* Queue Items */}
-            <div className="p-4 sm:p-5 pb-safe overflow-y-auto flex-1">
+            {/* Open Hairline Queue Items */}
+            <div className="px-5 sm:px-6 pb-safe overflow-y-auto flex-1">
               {items.length === 0 ? (
                 <div className="text-center py-10 text-rose-100/60 text-xs space-y-1">
                   <p className="text-sm font-medium text-white">Queue is empty</p>
                   <p>Paste one or more video URLs above and click Load Queue.</p>
                 </div>
               ) : (
-                <div className="rounded-xl border border-rose-300/20 divide-y divide-rose-300/15 bg-[#0D060C]">
+                <div className="divide-y divide-rose-300/15">
                   {items.map((item, idx) => (
                     <div
                       key={item.id}
-                      className="flex flex-col sm:flex-row sm:items-center justify-between px-4 py-3 gap-3"
+                      className="flex flex-col sm:flex-row sm:items-center justify-between py-3.5 gap-3"
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <span className="text-xs font-mono text-rose-100/45 tabular-nums w-5 shrink-0">
@@ -601,7 +619,7 @@ export function BatchDownloadModal({
                                 onClose();
                               }
                             }}
-                            className="px-3 min-h-[38px] rounded-lg text-xs font-medium bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 transition-colors cursor-pointer"
+                            className="px-3.5 min-h-[38px] rounded-full text-xs font-medium bg-white/[0.06] hover:bg-white/[0.12] text-white border border-rose-300/20 transition-colors cursor-pointer"
                           >
                             Inspect
                           </button>
@@ -610,7 +628,7 @@ export function BatchDownloadModal({
                             <button
                               type="button"
                               onClick={() => handleCancelBatchItem(item.id)}
-                              className="flex items-center gap-1 px-3 min-h-[38px] rounded-lg text-xs font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-200 border border-red-500/35 transition-colors cursor-pointer"
+                              className="flex items-center gap-1 px-3.5 min-h-[38px] rounded-full text-xs font-semibold bg-red-500/15 hover:bg-red-500/25 text-red-200 border border-red-400/35 transition-colors cursor-pointer"
                             >
                               <Square className="w-3 h-3 fill-current" />
                               <span>Stop</span>
@@ -629,7 +647,7 @@ export function BatchDownloadModal({
                                   format: item.completedFormat || 'mp4',
                                 })
                               }
-                              className="flex items-center gap-1.5 px-3 min-h-[38px] rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer"
+                              className="flex items-center gap-1.5 px-3.5 min-h-[38px] rounded-full text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer"
                             >
                               <Play className="w-3 h-3 fill-current" />
                               <span>
@@ -646,7 +664,7 @@ export function BatchDownloadModal({
                               onClick={() => {
                                 if (item.media) handleDownloadItem(item.id, item.media);
                               }}
-                              className="flex items-center gap-1.5 px-3.5 min-h-[38px] rounded-lg text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 transition-colors cursor-pointer"
+                              className="flex items-center gap-1.5 px-4 min-h-[38px] rounded-full text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 transition-colors cursor-pointer"
                             >
                               <Download className="w-3.5 h-3.5" />
                               <span>Download</span>
@@ -662,14 +680,14 @@ export function BatchDownloadModal({
 
             {/* Footer */}
             {items.some((it) => it.status === 'ready') && (
-              <div className="px-4 sm:px-6 py-4 pb-safe border-t border-rose-300/15 bg-[#0D060C] flex items-center justify-between gap-4">
+              <div className="px-5 sm:px-6 py-4 pb-safe border-t border-rose-300/15 flex items-center justify-between gap-4">
                 <span className="text-xs text-rose-100/65 font-mono tabular-nums">
                   {items.filter((it) => it.status === 'ready').length} ready
                 </span>
                 <button
                   type="button"
                   onClick={handleDownloadAllReady}
-                  className="flex items-center gap-2 px-5 min-h-[42px] rounded-lg text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 transition-colors cursor-pointer"
+                  className="flex items-center gap-2 px-5 min-h-[42px] rounded-full text-xs font-semibold bg-gradient-to-r from-rose-500 to-pink-500 hover:from-rose-400 hover:to-pink-400 text-white border border-white/25 transition-colors cursor-pointer"
                 >
                   <Download className="w-4 h-4" />
                   <span>Download All Ready</span>

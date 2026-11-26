@@ -1,11 +1,12 @@
 import { PlatformAdapter, formatBytes, formatDuration } from './base.js';
 import { AdapterResult, MediaMetadata, QualityOption } from '../types.js';
-import { validateSafeUrl, getPlatformSecurityCookies } from '../security.js';
+import { validateSafeUrl, safeFetch, sanitizeHttpUrl, getPlatformSecurityCookies } from '../security.js';
 import { extractWithYtDlp } from './ytdlp.js';
 
 function resolveTikWmUrl(raw: string): string {
   if (!raw) return '';
-  return raw.startsWith('http') ? raw : `https://www.tikwm.com${raw.startsWith('/') ? '' : '/'}${raw}`;
+  const abs = raw.startsWith('http') ? raw : `https://www.tikwm.com${raw.startsWith('/') ? '' : '/'}${raw}`;
+  return sanitizeHttpUrl(abs);
 }
 
 let tikWmQueue: Promise<void> = Promise.resolve();
@@ -20,8 +21,8 @@ async function withTikWmSlot<T>(fn: () => Promise<T>): Promise<T> {
   await prev;
   try {
     const elapsed = Date.now() - lastTikWmDoneAt;
-    if (elapsed < 1250) {
-      await new Promise((r) => setTimeout(r, 1250 - elapsed));
+    if (elapsed < 900) {
+      await new Promise((r) => setTimeout(r, 900 - elapsed));
     }
     return await fn();
   } finally {
@@ -86,10 +87,9 @@ export class TikTokAdapter implements PlatformAdapter {
 
       if (needsRedirectResolution) {
         try {
-          const headRes = await fetch(targetUrl, {
+          const { response: headRes, finalUrl } = await safeFetch(targetUrl, {
             method: 'GET',
-            redirect: 'follow',
-            signal: AbortSignal.timeout(5000),
+            signal: AbortSignal.timeout(4800),
             headers: {
               'User-Agent':
                 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
@@ -97,11 +97,8 @@ export class TikTokAdapter implements PlatformAdapter {
             },
           });
           await headRes.body?.cancel().catch(() => {});
-          if (headRes.url && headRes.url !== targetUrl) {
-            const redirectSafe = await validateSafeUrl(headRes.url);
-            if (redirectSafe.safe) {
-              targetUrl = headRes.url;
-            }
+          if (finalUrl && finalUrl !== targetUrl) {
+            targetUrl = finalUrl;
           }
         } catch {
           // Handled redirect resolution fallback cleanly
@@ -149,7 +146,7 @@ export class TikTokAdapter implements PlatformAdapter {
               if (apiRes.ok) {
                 const json: any = await apiRes.json();
                 if (json && json.code === -1) {
-                  await new Promise((r) => setTimeout(r, 1300));
+                  await new Promise((r) => setTimeout(r, 550));
                   continue;
                 }
                 if (json && json.code === 0 && json.data) {
@@ -160,13 +157,18 @@ export class TikTokAdapter implements PlatformAdapter {
                   const duration = Number(data.duration) || 0;
                   const qualities: QualityOption[] = [];
 
-                  if (data.hdplay) {
+                  const isPhotoPost = Array.isArray(data.images) && data.images.length > 0;
+                  const rawPlayUrl = data.play ? resolveTikWmUrl(data.play) : '';
+                  const playUrl = rawPlayUrl && !rawPlayUrl.includes('.mp3') ? rawPlayUrl : '';
+                  const hdUrl = data.hdplay ? resolveTikWmUrl(data.hdplay) : '';
+
+                  if (hdUrl && hdUrl !== playUrl) {
                     qualities.push({
                       id: '1080p',
                       label: '1080p Full HD (No Watermark)',
                       resolution: '1080p',
                       format: 'mp4',
-                      url: resolveTikWmUrl(data.hdplay),
+                      url: hdUrl,
                       isNative: true,
                       fileSizeBytes: data.hd_size,
                       fileSizeFormatted: formatBytes(data.hd_size),
@@ -174,40 +176,33 @@ export class TikTokAdapter implements PlatformAdapter {
                     });
                   }
 
-                  if (data.play) {
-                    const playUrl = resolveTikWmUrl(data.play);
+                  if (playUrl) {
                     qualities.push({
-                      id: '720p',
-                      label: '720p HD (No Watermark)',
-                      resolution: '720p',
+                      id: hdUrl && hdUrl !== playUrl ? '720p' : 'original_mp4',
+                      label: 'HD MP4 (No Watermark)',
+                      resolution: hdUrl && hdUrl !== playUrl ? '720p' : 'original',
                       format: 'mp4',
                       url: playUrl,
-                      isNative: !data.hdplay,
+                      isNative: !hdUrl || hdUrl === playUrl,
                       fileSizeBytes: data.size,
                       fileSizeFormatted: formatBytes(data.size),
                       hasAudio: true,
                     });
-
-                    qualities.push({
-                      id: '480p',
-                      label: '480p SD (Fast Stream)',
-                      resolution: '480p',
-                      format: 'mp4',
-                      url: playUrl,
-                      isNative: false,
-                      targetHeight: 480,
-                      hasAudio: true,
-                    });
                   }
 
-                  const musicRaw = data.music || data.music_info?.play;
-                  if (musicRaw) {
+                  const musicRaw = data.music || data.music_info?.play || (rawPlayUrl.includes('.mp3') ? rawPlayUrl : '');
+                  const musicResolved = musicRaw ? resolveTikWmUrl(musicRaw) : undefined;
+                  const primaryAudioSrc = musicResolved || playUrl || hdUrl || '';
+                  if (primaryAudioSrc) {
                     qualities.push({
                       id: 'audio',
-                      label: `Audio (${data.music_info?.title || 'Original Sound'})`,
+                      label: `MP3 Audio · ${data.music_info?.title || 'Original Sound'}`,
                       resolution: 'audio',
                       format: 'mp3',
-                      url: resolveTikWmUrl(musicRaw),
+                      bitrateKbps: 320,
+                      codec: 'MP3 320k',
+                      url: primaryAudioSrc,
+                      audioUrl: playUrl && playUrl !== primaryAudioSrc ? playUrl : undefined,
                       isNative: true,
                       hasAudio: true,
                     });
@@ -215,6 +210,7 @@ export class TikTokAdapter implements PlatformAdapter {
 
                   if (qualities.length > 0) {
                     const coverRaw = data.cover || data.origin_cover || data.images?.[0] || '';
+                    const isAudioOnlyPost = isPhotoPost && !playUrl && !hdUrl;
                     const metadata: MediaMetadata = {
                       id: videoId,
                       originalUrl: url,
@@ -234,7 +230,7 @@ export class TikTokAdapter implements PlatformAdapter {
                       durationFormatted: formatDuration(duration),
                       qualities,
                       extractedAt: new Date().toISOString(),
-                      sourceType: Array.isArray(data.images) && data.images.length > 0 ? 'clip' : 'video',
+                      sourceType: isAudioOnlyPost ? 'audio' : isPhotoPost ? 'clip' : 'video',
                     };
 
                     return { success: true, data: metadata };
@@ -297,7 +293,7 @@ export class TikTokAdapter implements PlatformAdapter {
           html.match(/class="result_author"[^>]*alt="([^"]+)"/);
         const authorName = authorMatch ? authorMatch[1].trim() : 'TikTok Creator';
         const avatarMatch = html.match(/class="result_author"[^>]*src="([^"]+)"/);
-        const avatarUrl = avatarMatch ? avatarMatch[1] : undefined;
+        const avatarUrl = avatarMatch ? sanitizeHttpUrl(avatarMatch[1]) || undefined : undefined;
 
         const descMatch = html.match(/<p class="maintext">([\s\S]*?)<\/p>/);
         const title = descMatch
@@ -314,20 +310,17 @@ export class TikTokAdapter implements PlatformAdapter {
           html.match(/class="[^"]*download_link\s+music[^"]*"[^>]*href="([^"]+)"/);
 
         const qualities: QualityOption[] = [];
-        const hdUrl =
-          hdLinkMatch?.[1]?.startsWith('http')
-            ? hdLinkMatch[1]
-            : noWatermarkMatch?.[1]?.startsWith('http')
-              ? noWatermarkMatch[1]
-              : null;
-        const sdUrl =
-          noWatermarkMatch?.[1]?.startsWith('http') ? noWatermarkMatch[1] : hdUrl;
+        const hdCandidate = sanitizeHttpUrl(hdLinkMatch?.[1]);
+        const sdCandidate = sanitizeHttpUrl(noWatermarkMatch?.[1]);
+        const mp3Candidate = sanitizeHttpUrl(mp3Match?.[1]);
+        const hdUrl = hdCandidate || sdCandidate || null;
+        const sdUrl = sdCandidate || hdUrl;
 
         if (hdUrl) {
           qualities.push({
             id: '1080p',
-            label: '1080p Full HD (No Watermark)',
-            resolution: '1080p',
+            label: 'HD MP4 (No Watermark)',
+            resolution: 'original',
             format: 'mp4',
             url: hdUrl,
             isNative: true,
@@ -335,36 +328,29 @@ export class TikTokAdapter implements PlatformAdapter {
           });
         }
 
-        if (sdUrl) {
+        if (sdUrl && sdUrl !== hdUrl) {
           qualities.push({
             id: '720p',
-            label: '720p HD (No Watermark)',
-            resolution: '720p',
+            label: 'Standard MP4 (No Watermark)',
+            resolution: 'original',
             format: 'mp4',
             url: sdUrl,
-            isNative: !hdLinkMatch && Boolean(noWatermarkMatch?.[1]),
-            hasAudio: true,
-          });
-
-          qualities.push({
-            id: '480p',
-            label: '480p SD (Fast Stream)',
-            resolution: '480p',
-            format: 'mp4',
-            url: sdUrl,
-            isNative: false,
-            targetHeight: 480,
+            isNative: !hdUrl,
             hasAudio: true,
           });
         }
 
-        if (mp3Match && mp3Match[1] && mp3Match[1].startsWith('http')) {
+        const sssAudioSrc = mp3Candidate || sdUrl || hdUrl;
+        if (sssAudioSrc) {
           qualities.push({
             id: 'audio',
-            label: 'Original Audio (MP3)',
+            label: 'MP3 Audio (320 kbps)',
             resolution: 'audio',
             format: 'mp3',
-            url: mp3Match[1],
+            bitrateKbps: 320,
+            codec: 'MP3 320k',
+            url: sssAudioSrc,
+            audioUrl: sdUrl && sdUrl !== sssAudioSrc ? sdUrl : undefined,
             isNative: true,
             hasAudio: true,
           });
@@ -386,7 +372,7 @@ export class TikTokAdapter implements PlatformAdapter {
               name: authorName,
               username: authorName.toLowerCase().replace(/[^a-z0-9_]/g, '_'),
               avatarUrl,
-              profileUrl: canonicalTiktokUrl,
+              profileUrl: sanitizeHttpUrl(canonicalTiktokUrl) || undefined,
             },
             thumbnailUrl: avatarUrl || '',
             durationSeconds: 0,
@@ -420,8 +406,8 @@ export class TikTokAdapter implements PlatformAdapter {
 
       // Method D: Direct TikTok HTML Hydration Data Fallback (__UNIVERSAL_DATA_FOR_REHYDRATION__)
       try {
-        const pageRes = await fetch(canonicalTiktokUrl, {
-          signal: AbortSignal.timeout(9000),
+        const { response: pageRes } = await safeFetch(canonicalTiktokUrl, {
+          signal: AbortSignal.timeout(7000),
           headers: {
             'User-Agent':
               'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
@@ -442,15 +428,20 @@ export class TikTokAdapter implements PlatformAdapter {
             const hdEntry = bitrates.find((b) => (b?.PlayAddr?.Height || 0) >= 1080 || String(b?.GearName || '').includes('1080'));
             const medEntry = bitrates.find((b) => (b?.PlayAddr?.Height || 0) >= 720);
 
-            const playAddr =
+            const playAddr = sanitizeHttpUrl(
               itemStruct?.video?.playAddr ||
-              itemStruct?.video?.downloadAddr ||
-              bitrates[0]?.PlayAddr?.UrlList?.[0];
+                itemStruct?.video?.downloadAddr ||
+                bitrates[0]?.PlayAddr?.UrlList?.[0]
+            );
 
-            const hdAddr = hdEntry?.PlayAddr?.UrlList?.[0] || medEntry?.PlayAddr?.UrlList?.[0] || playAddr;
+            const hdAddr = sanitizeHttpUrl(
+              hdEntry?.PlayAddr?.UrlList?.[0] || medEntry?.PlayAddr?.UrlList?.[0] || playAddr
+            );
 
-            if (playAddr && typeof playAddr === 'string') {
+            if (playAddr && hdAddr) {
               const duration = Number(itemStruct?.video?.duration) || 0;
+              const medUrl = sanitizeHttpUrl(medEntry?.PlayAddr?.UrlList?.[0]);
+              const musicPlay = sanitizeHttpUrl(itemStruct?.music?.playUrl);
               return {
                 success: true,
                 data: {
@@ -462,48 +453,46 @@ export class TikTokAdapter implements PlatformAdapter {
                   author: {
                     name: itemStruct.author?.nickname || 'TikTok Creator',
                     username: itemStruct.author?.uniqueId || 'tiktok_user',
-                    avatarUrl: itemStruct.author?.avatarLarger || itemStruct.author?.avatarMedium,
+                    avatarUrl: sanitizeHttpUrl(itemStruct.author?.avatarLarger || itemStruct.author?.avatarMedium) || undefined,
                     profileUrl: itemStruct.author?.uniqueId
                       ? `https://www.tiktok.com/@${itemStruct.author.uniqueId}`
                       : canonicalTiktokUrl,
                   },
-                  thumbnailUrl: itemStruct.video?.cover || itemStruct.video?.originCover || '',
+                  thumbnailUrl: sanitizeHttpUrl(itemStruct.video?.cover || itemStruct.video?.originCover),
                   durationSeconds: duration,
                   durationFormatted: formatDuration(duration),
                   qualities: [
                     {
-                      id: '1080p',
-                      label: '1080p Full HD (Original)',
-                      resolution: '1080p',
+                      id: 'original_mp4',
+                      label: 'Original MP4 Stream',
+                      resolution: 'original',
                       format: 'mp4',
                       url: hdAddr,
                       isNative: true,
                       hasAudio: true,
                     },
-                    {
-                      id: '720p',
-                      label: '720p HD',
-                      resolution: '720p',
-                      format: 'mp4',
-                      url: medEntry?.PlayAddr?.UrlList?.[0] || playAddr,
-                      isNative: !hdEntry,
-                      hasAudio: true,
-                    },
-                    {
-                      id: '480p',
-                      label: '480p SD',
-                      resolution: '480p',
-                      format: 'mp4',
-                      url: playAddr,
-                      isNative: false,
-                      hasAudio: true,
-                    },
+                    ...(medUrl && medUrl !== hdAddr
+                      ? [
+                          {
+                            id: '720p',
+                            label: '720p HD Stream',
+                            resolution: '720p',
+                            format: 'mp4' as const,
+                            url: medUrl,
+                            isNative: true,
+                            hasAudio: true,
+                          },
+                        ]
+                      : []),
                     {
                       id: 'audio',
-                      label: 'Original Audio (MP3)',
+                      label: 'MP3 Audio (320 kbps)',
                       resolution: 'audio',
                       format: 'mp3',
-                      url: itemStruct.music?.playUrl || playAddr,
+                      bitrateKbps: 320,
+                      codec: 'MP3 320k',
+                      url: musicPlay || playAddr,
+                      audioUrl: musicPlay && playAddr !== musicPlay ? playAddr : undefined,
                       isNative: true,
                       hasAudio: true,
                     },

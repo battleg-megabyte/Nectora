@@ -1,6 +1,7 @@
 import { PlatformAdapter, formatBytes } from './base.js';
 import { AdapterResult, MediaMetadata, QualityOption } from '../types.js';
-import { validateSafeUrl } from '../security.js';
+import { validateSafeUrl, safeFetch } from '../security.js';
+import { parseHlsMasterVariants } from './probe.js';
 import path from 'path';
 
 export class DirectMediaAdapter implements PlatformAdapter {
@@ -19,9 +20,11 @@ export class DirectMediaAdapter implements PlatformAdapter {
         '.ts',
         '.mp3',
         '.ogg',
+        '.opus',
         '.wav',
         '.flac',
         '.aac',
+        '.m4a',
       ];
       if (directExtensions.some((ext) => pathname.endsWith(ext))) {
         return true;
@@ -30,6 +33,8 @@ export class DirectMediaAdapter implements PlatformAdapter {
         parsed.search.includes('.mp4') ||
         parsed.search.includes('.webm') ||
         parsed.search.includes('.m3u8') ||
+        parsed.search.includes('.mp3') ||
+        parsed.search.includes('.m4a') ||
         parsed.hostname.includes('storage.googleapis.com') ||
         parsed.hostname.includes('cloudfront.net')
       ) {
@@ -54,31 +59,33 @@ export class DirectMediaAdapter implements PlatformAdapter {
       const probeHeaders: Record<string, string> = {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-        'Accept': '*/*',
+        Accept: '*/*',
       };
       if (cookies) {
         probeHeaders['Cookie'] = cookies;
       }
 
       try {
-        const headRes = await fetch(url, {
+        const { response: headRes } = await safeFetch(url, {
           method: 'HEAD',
           headers: probeHeaders,
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(2500),
         });
 
         if (headRes.ok) {
           contentType = (headRes.headers.get('content-type') || '').toLowerCase();
           const len = headRes.headers.get('content-length');
           if (len) contentLength = parseInt(len, 10);
+          await headRes.body?.cancel().catch(() => {});
         } else if (headRes.status === 403 || headRes.status === 405) {
-          const rangeRes = await fetch(url, {
+          await headRes.body?.cancel().catch(() => {});
+          const { response: rangeRes } = await safeFetch(url, {
             method: 'GET',
             headers: {
               ...probeHeaders,
               Range: 'bytes=0-1024',
             },
-            signal: AbortSignal.timeout(8000),
+            signal: AbortSignal.timeout(2500),
           });
           if (rangeRes.ok || rangeRes.status === 206) {
             contentType = (rangeRes.headers.get('content-type') || '').toLowerCase();
@@ -88,12 +95,14 @@ export class DirectMediaAdapter implements PlatformAdapter {
               if (total && total !== '*') contentLength = parseInt(total, 10);
             }
           }
+          await rangeRes.body?.cancel().catch(() => {});
+        } else {
+          await headRes.body?.cancel().catch(() => {});
         }
       } catch {
         // Probe fallback handled cleanly
       }
 
-      // If the URL actually serves an HTML webpage, let GenericMediaAdapter extract the embedded video
       if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
         return {
           success: false,
@@ -104,28 +113,85 @@ export class DirectMediaAdapter implements PlatformAdapter {
       const parsed = new URL(url);
       const filename = path.basename(parsed.pathname) || 'Direct Video Stream';
       const cleanTitle = decodeURIComponent(filename).replace(/\.[^/.]+$/, '');
+      const lowerPath = parsed.pathname.toLowerCase();
 
       const isHls =
-        parsed.pathname.toLowerCase().endsWith('.m3u8') ||
+        lowerPath.endsWith('.m3u8') ||
         contentType.includes('mpegurl') ||
         contentType.includes('m3u8');
 
       const isAudio =
         !isHls &&
         (contentType.startsWith('audio/') ||
-          parsed.pathname.toLowerCase().endsWith('.mp3') ||
-          parsed.pathname.toLowerCase().endsWith('.wav') ||
-          parsed.pathname.toLowerCase().endsWith('.aac'));
+          lowerPath.endsWith('.mp3') ||
+          lowerPath.endsWith('.wav') ||
+          lowerPath.endsWith('.aac') ||
+          lowerPath.endsWith('.m4a') ||
+          lowerPath.endsWith('.ogg') ||
+          lowerPath.endsWith('.flac'));
 
       const qualities: QualityOption[] = [];
 
-      if (!isAudio) {
+      if (isHls) {
+        const variants = await parseHlsMasterVariants(url);
+        if (variants.length > 0) {
+          variants.forEach((v, idx) => {
+            qualities.push({
+              id: `${v.resolution}_${idx}`,
+              label: v.width && v.height ? `${v.resolution} (${v.width}×${v.height}) · HLS` : `${v.resolution} · HLS`,
+              resolution: v.resolution,
+              format: 'mp4',
+              url: v.url,
+              width: v.width,
+              height: v.height,
+              isNative: idx === 0,
+              hasAudio: true,
+            });
+          });
+          // Use lowest-bandwidth HLS variant for fastest MP3 audio extraction
+          const fastestVariant = variants[variants.length - 1];
+          qualities.push({
+            id: 'audio',
+            label: 'MP3 Audio (320 kbps)',
+            resolution: 'audio',
+            format: 'mp3',
+            bitrateKbps: 320,
+            url: fastestVariant.url,
+            audioUrl: url,
+            isNative: true,
+            hasAudio: true,
+          });
+        } else {
+          qualities.push(
+            {
+              id: 'native_hls',
+              label: 'Original HLS Stream (MP4)',
+              resolution: 'original',
+              format: 'mp4',
+              url,
+              isNative: true,
+              hasAudio: true,
+            },
+            {
+              id: 'audio',
+              label: 'MP3 Audio (320 kbps)',
+              resolution: 'audio',
+              format: 'mp3',
+              bitrateKbps: 320,
+              url,
+              isNative: true,
+              hasAudio: true,
+            }
+          );
+        }
+      } else if (!isAudio) {
+        const format = lowerPath.endsWith('.webm') ? 'webm' : 'mp4';
         qualities.push(
           {
-            id: '1080p',
-            label: isHls ? '1080p Full HD (HLS to MP4)' : '1080p Full HD (Original Stream)',
-            resolution: '1080p',
-            format: 'mp4',
+            id: 'native_video',
+            label: `Original ${format.toUpperCase()} Stream`,
+            resolution: 'original',
+            format,
             url,
             isNative: true,
             fileSizeBytes: contentLength,
@@ -133,51 +199,23 @@ export class DirectMediaAdapter implements PlatformAdapter {
             hasAudio: true,
           },
           {
-            id: '720p',
-            label: '720p HD Stream',
-            resolution: '720p',
-            format: 'mp4',
-            url,
-            isNative: false,
-            fileSizeBytes: contentLength ? Math.round(contentLength * 0.65) : undefined,
-            fileSizeFormatted: contentLength
-              ? formatBytes(Math.round(contentLength * 0.65))
-              : undefined,
-            hasAudio: true,
-          },
-          {
-            id: '480p',
-            label: '480p SD Stream',
-            resolution: '480p',
-            format: 'mp4',
-            url,
-            isNative: false,
-            fileSizeBytes: contentLength ? Math.round(contentLength * 0.35) : undefined,
-            fileSizeFormatted: contentLength
-              ? formatBytes(Math.round(contentLength * 0.35))
-              : undefined,
-            hasAudio: true,
-          },
-          {
             id: 'audio',
-            label: 'Audio Stream (MP3)',
+            label: 'MP3 Audio (320 kbps)',
             resolution: 'audio',
             format: 'mp3',
+            bitrateKbps: 320,
             url,
             isNative: true,
-            fileSizeBytes: contentLength ? Math.round(contentLength * 0.15) : undefined,
-            fileSizeFormatted: contentLength
-              ? formatBytes(Math.round(contentLength * 0.15))
-              : undefined,
             hasAudio: true,
           }
         );
       } else {
         qualities.push({
           id: 'audio',
-          label: 'Direct Audio Stream',
+          label: lowerPath.endsWith('.m4a') ? 'Original M4A Audio' : 'Original MP3 Audio',
           resolution: 'audio',
-          format: 'mp3',
+          format: lowerPath.endsWith('.m4a') ? 'm4a' : 'mp3',
+          bitrateKbps: 320,
           url,
           isNative: true,
           fileSizeBytes: contentLength,
@@ -200,7 +238,7 @@ export class DirectMediaAdapter implements PlatformAdapter {
         thumbnailUrl: '',
         qualities,
         extractedAt: new Date().toISOString(),
-        sourceType: 'direct_stream',
+        sourceType: isAudio ? 'audio' : 'direct_stream',
       };
 
       return { success: true, data: metadata };

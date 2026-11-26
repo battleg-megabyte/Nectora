@@ -3,12 +3,11 @@
 @layer base {
   :root {
     color-scheme: dark;
-    /* Moonlit Rose + Pink + White Palette */
     --wk-canvas: #07020A;
-    --wk-surface: rgba(24, 9, 23, 0.72);
-    --wk-surface-deep: rgba(11, 4, 13, 0.86);
-    --wk-border: rgba(251, 113, 133, 0.28);
-    --wk-border-strong: rgba(244, 114, 182, 0.58);
+    --wk-surface: rgba(18, 7, 19, 0.72);
+    --wk-surface-deep: rgba(10, 4, 12, 0.88);
+    --wk-hairline: rgba(251, 113, 133, 0.16);
+    --wk-hairline-strong: rgba(244, 114, 182, 0.38);
     --wk-rose: #F43F5E;
     --wk-pink: #EC4899;
     --wk-white: #FFFFFF;
@@ -49,76 +48,118 @@
   }
 }
 
-/* Main App Moonlit Pink Clouds & Starry Sky Backdrop — crystal clarity with top moon bloom */
+/* Main App Canvas — actual responsive framing lives in GPU-accelerated backdrop layer */
 .studio-canvas {
   position: relative;
+  isolation: isolate;
   background-color: #07020A;
-  background-image:
-    radial-gradient(ellipse 58% 32% at 50% 4%, rgba(255, 224, 240, 0.20), rgba(244, 63, 94, 0.09) 46%, transparent 78%),
-    linear-gradient(
-      180deg,
-      rgba(7, 2, 10, 0.26) 0%,
-      rgba(10, 3, 13, 0.42) 34%,
-      rgba(12, 4, 15, 0.66) 70%,
-      rgba(7, 2, 10, 0.90) 100%
-    ),
-    radial-gradient(ellipse 96% 85% at 50% 42%, rgba(236, 72, 153, 0.07), rgba(7, 2, 10, 0.56) 86%),
-    url('/moon-backdrop-hd.jpg');
-  background-size: cover, cover, cover, cover;
-  background-position: center top, center center, center center, center 12%;
-  background-attachment: scroll, scroll, scroll, fixed;
-  background-repeat: no-repeat;
 }
 
-@media (max-width: 768px) {
-  .studio-canvas {
-    background-attachment: scroll, scroll, scroll, scroll;
-    background-position: center top, center center, center center, center top;
-  }
-}
-
-/* Cutscene Giant Pink Moon Above Cloud Sea */
 .cutscene-canvas {
   position: relative;
   background-color: #060208;
 }
 
-/* Obsidian-Rose Refractive Glass Surface */
-.wk-box {
-  background: linear-gradient(165deg, rgba(28, 10, 26, 0.78) 0%, rgba(11, 4, 13, 0.88) 100%);
-  backdrop-filter: blur(22px) saturate(140%);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
-  border: 1px solid rgba(251, 113, 133, 0.28);
+/* Box-free Fluid Lunar Command Capsule */
+.wk-lunar-bar {
+  background: radial-gradient(
+      120% 180% at 50% 0%,
+      rgba(251, 113, 133, 0.14) 0%,
+      rgba(20, 7, 21, 0.88) 46%,
+      rgba(10, 4, 12, 0.96) 100%
+    );
+  backdrop-filter: blur(24px) saturate(155%);
+  -webkit-backdrop-filter: blur(24px) saturate(155%);
+  border: 1px solid rgba(251, 113, 133, 0.34);
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.16),
-    inset 0 0 28px -14px rgba(244, 114, 182, 0.16),
-    0 24px 52px -18px rgba(0, 0, 0, 0.88),
-    0 0 0 1px rgba(255, 255, 255, 0.04);
-  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1), transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.18),
+    0 20px 60px -16px rgba(244, 63, 94, 0.28),
+    0 28px 54px -20px rgba(0, 0, 0, 0.94);
+  transition: border-color 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Luminous Flagship Command Deck Glow */
-.wk-command-deck {
-  background: linear-gradient(165deg, rgba(31, 11, 29, 0.84) 0%, rgba(13, 5, 15, 0.92) 100%);
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  border: 1px solid rgba(251, 113, 133, 0.42);
+/* Open Atmospheric Radial Stage (No Enclosing Rectangular Card Borders) */
+.wk-open-stage {
+  background: radial-gradient(
+    88% 72% at 50% 0%,
+    rgba(28, 10, 28, 0.76) 0%,
+    rgba(11, 4, 13, 0.56) 62%,
+    rgba(7, 2, 10, 0.08) 100%
+  );
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+/* Smooth Organic Translucent Overlay Sheet (for Modals & Mobile Sheets) */
+.wk-sheet {
+  background: radial-gradient(
+      110% 80% at 50% 0%,
+      rgba(34, 11, 31, 0.94) 0%,
+      rgba(12, 5, 14, 0.96) 55%,
+      rgba(8, 3, 10, 0.98) 100%
+    );
+  backdrop-filter: blur(26px) saturate(150%);
+  -webkit-backdrop-filter: blur(26px) saturate(150%);
+  border: 1px solid rgba(251, 113, 133, 0.22);
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.22),
-    0 20px 60px -15px rgba(244, 63, 94, 0.26),
-    0 26px 56px -18px rgba(0, 0, 0, 0.92);
-  transition: border-color 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
+    0 32px 72px -18px rgba(0, 0, 0, 0.94);
 }
 
-.wk-box-well {
-  background-color: rgba(11, 4, 13, 0.82);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(244, 114, 182, 0.22);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.07);
+/* Open Capability Spotlight Wash on Hover */
+.wk-spotlight-col {
+  position: relative;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Ambient Float & Luminous Sweep Animations */
+.wk-spotlight-col::before {
+  content: '';
+  position: absolute;
+  inset: -6px -4px;
+  border-radius: 28px;
+  background: radial-gradient(75% 70% at 50% 0%, rgba(251, 113, 133, 0.10) 0%, transparent 72%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.wk-spotlight-col:hover::before {
+  opacity: 1;
+}
+
+/* Shimmering Lunar Skeleton Surfaces */
+@keyframes wk-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.wk-skeleton {
+  background: linear-gradient(
+    105deg,
+    rgba(255, 255, 255, 0.04) 20%,
+    rgba(251, 113, 133, 0.14) 50%,
+    rgba(255, 255, 255, 0.04) 80%
+  );
+  background-size: 200% 100%;
+  animation: wk-shimmer 1.7s ease-in-out infinite;
+}
+
+.wk-skeleton-bright {
+  background: linear-gradient(
+    105deg,
+    rgba(251, 113, 133, 0.12) 20%,
+    rgba(244, 114, 182, 0.26) 50%,
+    rgba(251, 113, 133, 0.12) 80%
+  );
+  background-size: 200% 100%;
+  animation: wk-shimmer 1.7s ease-in-out infinite;
+}
+
+/* Ambient Float & Sheen Animations (strict GPU transform/opacity) */
 @keyframes wk-float-slow {
   0%, 100% {
     transform: translateY(0px);
@@ -129,7 +170,35 @@
 }
 
 .animate-float-slow {
-  animation: wk-float-slow 4.5s ease-in-out infinite;
+  animation: wk-float-slow 5s ease-in-out infinite;
+}
+
+@keyframes wk-bird-float-left {
+  0%, 100% {
+    transform: translate3d(0px, 0px, 0px) rotate(-1deg);
+  }
+  50% {
+    transform: translate3d(4px, -10px, 0px) rotate(1.2deg);
+  }
+}
+
+@keyframes wk-bird-float-right {
+  0%, 100% {
+    transform: translate3d(0px, 0px, 0px) rotate(1deg);
+  }
+  50% {
+    transform: translate3d(-4px, -9px, 0px) rotate(-1.2deg);
+  }
+}
+
+.wk-bird-left {
+  animation: wk-bird-float-left 7.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.wk-bird-right {
+  animation: wk-bird-float-right 8.2s ease-in-out infinite;
+  will-change: transform;
 }
 
 @keyframes wk-sheen-sweep {
@@ -142,10 +211,9 @@
 }
 
 .wk-sheen-hover:hover::after {
-  animation: wk-sheen-sweep 0.75s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: wk-sheen-sweep 0.65s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-/* Extraction vertical scan beam */
 @keyframes studio-scan-y {
   0% {
     transform: translateY(-10%);
@@ -161,10 +229,9 @@
 }
 
 .animate-scan-y {
-  animation: studio-scan-y 2.1s ease-in-out infinite;
+  animation: studio-scan-y 1.8s ease-in-out infinite;
 }
 
-/* Mobile safe bottom padding helper */
 .pb-safe {
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
@@ -180,7 +247,6 @@
   }
 }
 
-/* Custom Rose-Pink Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -191,7 +257,7 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(251, 113, 133, 0.34);
+  background: rgba(251, 113, 133, 0.32);
   border-radius: 9999px;
 }
 

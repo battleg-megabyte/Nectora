@@ -29,10 +29,15 @@ export class TempFileManager {
   }
 
   public safeDelete(filePath: string) {
-    if (!filePath || !filePath.startsWith(this.tempDir)) {
+    if (!filePath || typeof filePath !== 'string') {
       return;
     }
-    fs.promises.unlink(filePath).catch(() => {});
+    const resolvedBase = path.resolve(this.tempDir) + path.sep;
+    const resolvedTarget = path.resolve(filePath);
+    if (!resolvedTarget.startsWith(resolvedBase)) {
+      return;
+    }
+    fs.promises.unlink(resolvedTarget).catch(() => {});
   }
 
   private sweepOldFiles() {

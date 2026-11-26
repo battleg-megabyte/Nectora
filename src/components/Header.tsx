@@ -1,12 +1,7 @@
-import { useState, useEffect, MouseEvent } from 'react';
-import { History, Menu, X, Layers, CheckCircle2, Volume2, VolumeX, Globe2, Cpu } from 'lucide-react';
+import { useState, MouseEvent } from 'react';
+import { History, Menu, X, Layers, CheckCircle2, Globe2, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WukongBrandMark } from './WukongBrandMark';
-import {
-  isSoundEnabled,
-  setSoundEnabled,
-  subscribeSoundEnabled,
-} from '../utils/soundEffects';
 
 interface HeaderProps {
   onOpenHistory: () => void;
@@ -26,22 +21,10 @@ export function Header({
   historyCount,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [soundOn, setSoundOn] = useState(isSoundEnabled());
-
-  useEffect(() => {
-    return subscribeSoundEnabled((enabled) => {
-      setSoundOn(enabled);
-    });
-  }, []);
 
   const triggerMobileAction = (fn: () => void) => {
     setMobileMenuOpen(false);
     fn();
-  };
-
-  const handleToggleSound = () => {
-    const next = setSoundEnabled(!soundOn);
-    setSoundOn(next);
   };
 
   const handleLinkNav = (e: MouseEvent, path: string) => {
@@ -55,9 +38,9 @@ export function Header({
   return (
     <header
       id="app-header"
-      className="sticky top-0 z-40 w-full border-b border-rose-300/20 bg-[#08030A]/70 backdrop-blur-xl"
+      className="sticky top-0 z-40 w-full border-b border-rose-300/15 bg-[#07020A]/75 backdrop-blur-xl"
     >
-      <div className="max-w-6xl mx-auto px-3 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-6">
+      <div className="max-w-6xl mx-auto px-3.5 sm:px-6 lg:px-8 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-6">
         {/* Zone 1: Brand Wordmark */}
         <a
           href="/"
@@ -76,10 +59,10 @@ export function Header({
           </span>
         </a>
 
-        {/* Zone 2: Clean Text Navigation Links with Crisp Icons */}
+        {/* Zone 2: Clean Unboxed Navigation Links */}
         <nav
           aria-label="Primary navigation"
-          className="hidden md:flex items-center gap-6 text-sm font-medium text-rose-100/80"
+          className="hidden md:flex items-center gap-7 text-sm font-medium text-rose-100/80"
         >
           <a
             href="/supported-platforms"
@@ -117,34 +100,19 @@ export function Header({
           </button>
         </nav>
 
-        {/* Zone 3: Sound Control + History Action + Mobile Drawer Toggle */}
-        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-          <button
-            id="btn-sound-toggle"
-            type="button"
-            onClick={handleToggleSound}
-            title={soundOn ? 'Mute cutscene & extraction sound' : 'Unmute sound effects'}
-            aria-label={soundOn ? 'Mute sound effects' : 'Enable sound effects'}
-            className="min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#160815]/80 hover:bg-[#251023] text-white border border-rose-300/25 hover:border-pink-400/60 transition-colors cursor-pointer"
-          >
-            {soundOn ? (
-              <Volume2 className="w-4 h-4 text-rose-400" />
-            ) : (
-              <VolumeX className="w-4 h-4 text-rose-100/45" />
-            )}
-          </button>
-
+        {/* Zone 3: History Action + Mobile Drawer Toggle (Zero sound button, unboxed action) */}
+        <div className="flex items-center gap-2 shrink-0">
           <button
             id="btn-history-modal"
             type="button"
             onClick={onOpenHistory}
-            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 min-h-[40px] rounded-lg text-xs sm:text-sm font-medium bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 hover:border-pink-400/55 transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            className="flex items-center gap-1.5 px-2.5 min-h-[40px] text-xs sm:text-sm font-medium text-rose-100/85 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
           >
             <History className="w-4 h-4 text-pink-400 shrink-0" />
             <span>History</span>
             {historyCount > 0 && (
-              <span className="font-mono text-xs text-rose-200 tabular-nums">
-                ({historyCount})
+              <span className="font-mono text-xs text-rose-300 tabular-nums">
+                {historyCount}
               </span>
             )}
           </button>
@@ -154,9 +122,9 @@ export function Header({
             onClick={() => setMobileMenuOpen((v) => !v)}
             aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
             aria-expanded={mobileMenuOpen}
-            className="md:hidden min-w-[40px] min-h-[40px] flex items-center justify-center rounded-lg bg-[#140A13] hover:bg-[#221020] text-white border border-rose-300/20 transition-colors cursor-pointer"
+            className="md:hidden min-w-[40px] min-h-[40px] flex items-center justify-center text-rose-100/85 hover:text-white transition-colors cursor-pointer"
           >
-            {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
+            {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
         </div>
       </div>
@@ -165,16 +133,16 @@ export function Header({
       <AnimatePresence>
         {mobileMenuOpen && (
           <motion.div
-            initial={{ opacity: 0, y: -8 }}
+            initial={{ opacity: 0, y: -6 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.16, ease: [0.16, 1, 0.3, 1] }}
-            className="md:hidden border-t border-rose-300/15 bg-[#0D060C] px-4 py-3 space-y-1"
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
+            className="md:hidden border-t border-rose-300/15 bg-[#09030D]/95 backdrop-blur-xl px-4 py-3 space-y-1"
           >
             <a
               href="/supported-platforms"
               onClick={(e) => handleLinkNav(e, '/supported-platforms')}
-              className="w-full flex items-center gap-3 px-3 min-h-[44px] rounded-lg text-sm font-medium text-white hover:bg-rose-500/10 transition-colors text-left"
+              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
             >
               <Globe2 className="w-4 h-4 text-rose-300 shrink-0" />
               <span>Supported Platforms</span>
@@ -182,7 +150,7 @@ export function Header({
             <a
               href="/mcp"
               onClick={(e) => handleLinkNav(e, '/mcp')}
-              className="w-full flex items-center gap-3 px-3 min-h-[44px] rounded-lg text-sm font-medium text-white hover:bg-rose-500/10 transition-colors text-left"
+              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
             >
               <Cpu className="w-4 h-4 text-pink-300 shrink-0" />
               <span>MCP Server &amp; API</span>
@@ -190,7 +158,7 @@ export function Header({
             <button
               type="button"
               onClick={() => triggerMobileAction(onOpenBatch)}
-              className="w-full flex items-center gap-3 px-3 min-h-[44px] rounded-lg text-sm font-medium text-white hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
+              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left cursor-pointer"
             >
               <Layers className="w-4 h-4 text-rose-400 shrink-0" />
               <span>Batch Queue</span>
@@ -198,7 +166,7 @@ export function Header({
             <button
               type="button"
               onClick={() => triggerMobileAction(onOpenDiagnostics)}
-              className="w-full flex items-center gap-3 px-3 min-h-[44px] rounded-lg text-sm font-medium text-white hover:bg-rose-500/10 transition-colors text-left cursor-pointer"
+              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left cursor-pointer"
             >
               <CheckCircle2 className="w-4 h-4 text-pink-400 shrink-0" />
               <span>Stream Check</span>

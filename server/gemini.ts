@@ -1,4 +1,4 @@
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 let aiClient: GoogleGenAI | null = null;
 const AI_CACHE_TTL_MS = 10 * 60_000;
@@ -84,7 +84,7 @@ export interface SearchContextResult {
 }
 
 /**
- * Deep Video and Media Understanding (uses gemini-3.7-flash with caching & fast timeout)
+ * Deep Video & Media Understanding using gemini-4-hydrogen (ThinkingLevel.LOW for snappy responses)
  */
 export async function analyzeMediaContent(metadata: {
   title: string;
@@ -126,21 +126,22 @@ Title: "${metadata.title}"
 Description: "${metadata.description || 'N/A'}"
 Creator: "${metadata.authorName || 'N/A'}"
 
-Provide a detailed structural analysis including:
-1. A concise, compelling 2-sentence summary.
-2. 3-4 likely key visual moments / timestamps (e.g. 0:00, 0:15).
+Provide a concise structural analysis:
+1. 2-sentence summary.
+2. 3-4 key moments / timestamps (e.g. 0:00, 0:15).
 3. 5-7 core topic tags.
-4. Estimated viral engagement potential score (0 to 100).
+4. Estimated viral engagement score (0 to 100).
 5. Primary content category.
-6. Sentiment analysis (Positive, Energetic, Informative, Humorous, etc.).
-7. 3 suggested alternative engaging captions.`;
+6. Sentiment (e.g. Positive, Energetic, Informative, Humorous).
+7. 3 suggested engaging repost captions.`;
 
   try {
     const response = await withTimeout(
       ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           responseMimeType: 'application/json',
           responseSchema: {
             type: Type.OBJECT,
@@ -173,7 +174,7 @@ Provide a detailed structural analysis including:
           },
         },
       }),
-      6500
+      7000
     );
 
     const parsed = JSON.parse(response.text || '{}') as VideoAnalysisResult;
@@ -188,7 +189,7 @@ Provide a detailed structural analysis including:
 }
 
 /**
- * Low-latency response generator using gemini-3.1-flash-lite
+ * Low-latency tag generator using gemini-3.1-flash-lite
  */
 export async function generateFastTags(title: string, platform: string): Promise<FastTagsResult> {
   const cacheKey = `tags:${platform}:${title}`;
@@ -248,7 +249,7 @@ export async function generateFastTags(title: string, platform: string): Promise
 }
 
 /**
- * Grounded search research using gemini-3.7-flash with Google Search
+ * Grounded search research using gemini-4-hydrogen with Google Search
  */
 export async function searchVideoContext(query: string): Promise<SearchContextResult> {
   const cacheKey = `search:${query.toLowerCase()}`;
@@ -273,13 +274,14 @@ export async function searchVideoContext(query: string): Promise<SearchContextRe
   try {
     const response = await withTimeout(
       ai.models.generateContent({
-        model: 'gemini-3.7-flash',
+        model: 'gemini-4-hydrogen',
         contents: prompt,
         config: {
+          thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
           tools: [{ googleSearch: {} }],
         },
       }),
-      7000
+      7500
     );
 
     const text = response.text || 'No background search data found.';

@@ -30,7 +30,7 @@ export function Footer({
   };
 
   return (
-    <footer className="w-full border-t border-rose-300/20 bg-[#08030A]/80 backdrop-blur-xl mt-14 sm:mt-20 py-9 sm:py-11">
+    <footer className="w-full border-t border-rose-300/15 bg-[#07020A]/82 backdrop-blur-xl mt-14 sm:mt-20 py-9 sm:py-11">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
           {/* Brand & Compliance Notice */}
@@ -112,7 +112,7 @@ export function Footer({
                 </li>
                 <li>
                   <a href="/llms.txt" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">
-                    /llms.txt Guide
+                    /llms.txt Spec
                   </a>
                 </li>
                 <li>
@@ -144,16 +144,16 @@ export function Footer({
           </div>
         </div>
 
-        {/* Utility Action Strip */}
+        {/* Unboxed Utility Action Strip */}
         <div className="pt-5 border-t border-rose-300/15 flex flex-wrap items-center justify-between gap-4">
           <span className="text-[11px] text-rose-100/55">
             WuKong Vid · Creator, Developer &amp; MCP Extraction Platform
           </span>
-          <div className="flex flex-wrap items-center gap-2.5 text-xs font-medium text-rose-100/80">
+          <div className="flex flex-wrap items-center gap-5 text-xs font-medium text-rose-100/80">
             <button
               type="button"
               onClick={onOpenBatch}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#160815]/75 hover:bg-[#251023] border border-rose-300/20 hover:border-rose-400/50 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="flex items-center gap-1.5 py-1 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Layers className="w-3.5 h-3.5 text-rose-400" />
               <span>Batch Queue</span>
@@ -161,7 +161,7 @@ export function Footer({
             <button
               type="button"
               onClick={onOpenDiagnostics}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#160815]/75 hover:bg-[#251023] border border-rose-300/20 hover:border-pink-400/50 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="flex items-center gap-1.5 py-1 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <CheckCircle2 className="w-3.5 h-3.5 text-pink-400" />
               <span>Stream Check</span>
@@ -169,9 +169,9 @@ export function Footer({
             <button
               type="button"
               onClick={onOpenMcp}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#160815]/75 hover:bg-[#251023] border border-rose-300/20 hover:border-white/50 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              className="flex items-center gap-1.5 py-1 hover:text-white transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
-              <Cpu className="w-3.5 h-3.5 text-white" />
+              <Cpu className="w-3.5 h-3.5 text-emerald-300" />
               <span>MCP / API</span>
             </button>
           </div>

@@ -14,12 +14,14 @@ import {
   validateSafeUrl,
   safeFetch,
   validateFfmpegRemoteUrl,
+  sanitizeHttpUrl,
   sanitizeFilename,
   sanitizeCookieHeader,
   sanitizeMediaFormat,
   sanitizeAudioBitrate,
   sanitizeVideoHeight,
   getPlatformSecurityCookies,
+  unpackPackedJs,
 } from './server/security.js';
 import { RateLimiter } from './server/rateLimiter.js';
 import { tempManager } from './server/tempManager.js';
@@ -142,6 +144,8 @@ function buildFfmpegHttpArgs(parsedUrl: URL, clientCookies?: string, isHls = fal
 
   const args: string[] = [
     '-nostdin',
+    '-rw_timeout',
+    '12000000',
     '-protocol_whitelist',
     'http,https,tcp,tls,crypto',
     '-user_agent',
@@ -153,7 +157,18 @@ function buildFfmpegHttpArgs(parsedUrl: URL, clientCookies?: string, isHls = fal
   }
 
   if (isHls) {
-    args.push('-http_persistent', '1', '-fflags', '+genpts+discardcorrupt');
+    args.push(
+      '-allowed_extensions',
+      'ALL',
+      '-analyzeduration',
+      '4000000',
+      '-probesize',
+      '4000000',
+      '-http_persistent',
+      '1',
+      '-fflags',
+      '+genpts+discardcorrupt'
+    );
   } else {
     args.push('-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5');
   }
@@ -279,86 +294,463 @@ function spawnGuardedFfmpegStream(options: {
   });
 }
 
-async function transcodeAudioViaTempFallback(options: {
+async function downloadToTempFile(
+  targetUrl: string,
+  headers: Record<string, string>,
+  destPath: string,
+  signal: AbortSignal
+): Promise<{ ok: boolean; status?: number }> {
+  let { response: upstreamRes } = await safeFetch(targetUrl, {
+    headers,
+    signal,
+  });
+
+  if (upstreamRes.status === 401 || upstreamRes.status === 403) {
+    await upstreamRes.body?.cancel().catch(() => {});
+    const retryFetch = await safeFetch(targetUrl, {
+      headers: {
+        'User-Agent': headers['User-Agent'] || 'Mozilla/5.0',
+        Accept: '*/*',
+      },
+      signal,
+    });
+    upstreamRes = retryFetch.response;
+  }
+
+  if (!upstreamRes.ok || !upstreamRes.body) {
+    await upstreamRes.body?.cancel().catch(() => {});
+    return { ok: false, status: upstreamRes.status || 502 };
+  }
+
+  const ctype = (upstreamRes.headers.get('content-type') || '').toLowerCase();
+  if (ctype.includes('text/html') || ctype.includes('application/json') || ctype.includes('text/plain')) {
+    await upstreamRes.body.cancel().catch(() => {});
+    return { ok: false, status: 403 };
+  }
+
+  const fileWriteStream = fs.createWriteStream(destPath);
+  const readable = Readable.fromWeb(upstreamRes.body as any);
+  await new Promise<void>((resolve, reject) => {
+    readable.on('error', reject);
+    fileWriteStream.on('error', reject);
+    fileWriteStream.on('finish', resolve);
+    readable.pipe(fileWriteStream);
+  });
+
+  return { ok: true, status: upstreamRes.status };
+}
+
+const AUDIO_CACHE_TTL_MS = 4 * 60_000;
+const MAX_AUDIO_CACHE_ENTRIES = 18;
+const audioTempCache = new Map<
+  string,
+  { filePath: string; size: number; contentType: string; expiresAt: number }
+>();
+const audioBuildInFlight = new Map<
+  string,
+  Promise<{ filePath: string; size: number; contentType: string } | { error: string; status: number }>
+>();
+
+function pruneAudioCache() {
+  const now = Date.now();
+  for (const [k, v] of audioTempCache.entries()) {
+    if (v.expiresAt <= now || !fs.existsSync(v.filePath)) {
+      audioTempCache.delete(k);
+      tempManager.safeDelete(v.filePath);
+    }
+  }
+  while (audioTempCache.size >= MAX_AUDIO_CACHE_ENTRIES) {
+    const oldestKey = audioTempCache.keys().next().value;
+    if (!oldestKey) break;
+    const oldVal = audioTempCache.get(oldestKey);
+    audioTempCache.delete(oldestKey);
+    if (oldVal) tempManager.safeDelete(oldVal.filePath);
+  }
+}
+
+function getCachedAudioEntry(cacheKey: string) {
+  const hit = audioTempCache.get(cacheKey);
+  if (!hit) return null;
+  if (hit.expiresAt <= Date.now() || !fs.existsSync(hit.filePath)) {
+    audioTempCache.delete(cacheKey);
+    tempManager.safeDelete(hit.filePath);
+    return null;
+  }
+  return hit;
+}
+
+function serveRangedTempFile(options: {
+  req: Request;
+  res: Response;
+  filePath: string;
+  size: number;
+  contentType: string;
+  cleanAsciiFilename?: string;
+  safeFilename?: string;
+}) {
+  const { req, res, filePath, size, contentType, cleanAsciiFilename, safeFilename } = options;
+
+  if (cleanAsciiFilename && safeFilename) {
+    sendAttachmentHeaders(res, contentType, cleanAsciiFilename, safeFilename);
+  } else {
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+  }
+
+  const rangeHeader = req.headers.range;
+  if (rangeHeader && !cleanAsciiFilename) {
+    const match = rangeHeader.match(/bytes=(\d*)-(\d*)/);
+    if (match) {
+      const start = match[1] ? parseInt(match[1], 10) : 0;
+      const end = match[2] ? Math.min(size - 1, parseInt(match[2], 10)) : size - 1;
+      if (start >= size || start < 0 || end < start) {
+        res.status(416).setHeader('Content-Range', `bytes */${size}`).end();
+        return;
+      }
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${size}`);
+      res.setHeader('Content-Length', String(end - start + 1));
+      if (req.method === 'HEAD') {
+        res.end();
+        return;
+      }
+      const rs = fs.createReadStream(filePath, { start, end });
+      req.on('close', () => rs.destroy());
+      rs.pipe(res);
+      return;
+    }
+  }
+
+  res.status(200);
+  res.setHeader('Content-Length', String(size));
+  if (req.method === 'HEAD') {
+    res.end();
+    return;
+  }
+  const rs = fs.createReadStream(filePath);
+  req.on('close', () => rs.destroy());
+  rs.pipe(res);
+}
+
+async function buildTranscodedAudioFile(options: {
+  cacheKey: string;
   mediaUrl: string;
+  audioFallbackUrl?: string;
+  clientCookies?: string;
+  format: 'mp3' | 'm4a';
+  bitrate: string;
+}): Promise<{ filePath: string; size: number; contentType: string } | { error: string; status: number }> {
+  const existing = getCachedAudioEntry(options.cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const inFlight = audioBuildInFlight.get(options.cacheKey);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const work = (async (): Promise<
+    { filePath: string; size: number; contentType: string } | { error: string; status: number }
+  > => {
+    const outputTmp = tempManager.getTempFilePath(options.format);
+    const contentType = options.format === 'm4a' ? 'audio/mp4' : 'audio/mpeg';
+    const isVideoOnlyLike = (u: string) =>
+      u.includes('/DASH_') || u.includes('bytestart=') || u.includes('mime_type=video');
+
+    const rawCandidates =
+      options.audioFallbackUrl && isVideoOnlyLike(options.mediaUrl)
+        ? [options.audioFallbackUrl, options.mediaUrl]
+        : [options.mediaUrl, ...(options.audioFallbackUrl ? [options.audioFallbackUrl] : [])];
+    const candidateUrls = Array.from(new Set(rawCandidates.filter(Boolean)));
+
+    let lastStatus = 502;
+    let noAudioDetected = false;
+    let succeeded = false;
+
+    for (const candidateUrl of candidateUrls) {
+      const inputTmp = tempManager.getTempFilePath('media');
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 90_000);
+      try {
+        const candidateParsed = new URL(candidateUrl);
+        const candidateHeaders = buildUpstreamHeaders(candidateParsed, options.clientCookies);
+        candidateHeaders['Accept-Encoding'] = 'identity';
+        const isHls = isHlsStreamUrl(candidateUrl);
+
+        if (!isHls) {
+          const dl = await downloadToTempFile(
+            candidateUrl,
+            candidateHeaders,
+            inputTmp.filePath,
+            ctrl.signal
+          );
+          if (!dl.ok) {
+            lastStatus = dl.status || 502;
+            continue;
+          }
+        }
+
+        const inputSource = isHls ? candidateUrl : inputTmp.filePath;
+        const extraInputArgs = isHls ? buildFfmpegHttpArgs(candidateParsed, options.clientCookies, true) : [];
+        const codecArgs =
+          options.format === 'm4a'
+            ? ['-c:a', 'aac', '-b:a', options.bitrate, '-ar', '44100', '-ac', '2', '-movflags', '+faststart']
+            : [
+                '-c:a', 'libmp3lame',
+                '-b:a', options.bitrate,
+                '-compression_level', '7',
+                '-ar', '44100',
+                '-ac', '2',
+                '-id3v2_version', '3',
+                '-write_xing', '1',
+              ];
+
+        const ffConvert = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+          const args = [
+            '-nostdin',
+            '-y',
+            '-hide_banner',
+            '-loglevel', 'error',
+            '-threads', '0',
+            ...extraInputArgs,
+            '-i', inputSource,
+            '-vn', '-sn', '-dn',
+            '-map', '0:a:0',
+            ...codecArgs,
+            outputTmp.filePath,
+          ];
+          const proc = spawn(getFfmpegPath(), args);
+          let errOut = '';
+          proc.stderr.on('data', (d) => {
+            errOut += d.toString();
+          });
+          proc.on('close', (code) => resolve({ code, stderr: errOut }));
+          proc.on('error', (e) => resolve({ code: 1, stderr: e.message }));
+        });
+
+        if (ffConvert.code === 0 && fs.existsSync(outputTmp.filePath) && fs.statSync(outputTmp.filePath).size > 0) {
+          succeeded = true;
+          break;
+        }
+        if (
+          ffConvert.stderr.includes('does not contain any stream') ||
+          ffConvert.stderr.includes('matches no streams')
+        ) {
+          noAudioDetected = true;
+        }
+      } catch {
+        // Try next candidate
+      } finally {
+        clearTimeout(timeout);
+        tempManager.safeDelete(inputTmp.filePath);
+      }
+    }
+
+    if (!succeeded || !fs.existsSync(outputTmp.filePath)) {
+      tempManager.safeDelete(outputTmp.filePath);
+      if (noAudioDetected) {
+        return {
+          error: `This video has no audio track to convert to ${options.format.toUpperCase()}.`,
+          status: 422,
+        };
+      }
+      return {
+        error: `Unable to convert audio stream to ${options.format.toUpperCase()}. Please re-extract the link.`,
+        status: lastStatus >= 400 ? lastStatus : 502,
+      };
+    }
+
+    const stat = fs.statSync(outputTmp.filePath);
+    pruneAudioCache();
+    audioTempCache.set(options.cacheKey, {
+      filePath: outputTmp.filePath,
+      size: stat.size,
+      contentType,
+      expiresAt: Date.now() + AUDIO_CACHE_TTL_MS,
+    });
+    return { filePath: outputTmp.filePath, size: stat.size, contentType };
+  })();
+
+  audioBuildInFlight.set(options.cacheKey, work);
+  try {
+    return await work;
+  } finally {
+    audioBuildInFlight.delete(options.cacheKey);
+  }
+}
+
+async function transcodeAudioViaTempFallback(options: {
+  cacheKey?: string;
+  mediaUrl: string;
+  audioFallbackUrl?: string;
   upstreamHeaders: Record<string, string>;
+  clientCookies?: string;
   res: Response;
   req: Request;
-  cleanAsciiFilename: string;
-  safeFilename: string;
+  cleanAsciiFilename?: string;
+  safeFilename?: string;
   format: 'mp3' | 'm4a';
   bitrate: string;
 }) {
-  const { mediaUrl, upstreamHeaders, res, req, cleanAsciiFilename, safeFilename, format, bitrate } = options;
-  const inputTmp = tempManager.getTempFilePath('media');
-  const outputTmp = tempManager.getTempFilePath(format);
+  const key =
+    options.cacheKey ||
+    `${options.format}:${options.bitrate}:${options.mediaUrl}|${options.audioFallbackUrl || ''}`;
+  const built = await buildTranscodedAudioFile({
+    cacheKey: key,
+    mediaUrl: options.mediaUrl,
+    audioFallbackUrl: options.audioFallbackUrl,
+    clientCookies: options.clientCookies,
+    format: options.format,
+    bitrate: options.bitrate,
+  });
+
+  if (options.req.destroyed || options.res.writableEnded) return;
+  if ('error' in built) {
+    if (!options.res.headersSent) {
+      options.res.status(built.status).json({ error: built.error });
+    }
+    return;
+  }
+
+  serveRangedTempFile({
+    req: options.req,
+    res: options.res,
+    filePath: built.filePath,
+    size: built.size,
+    contentType: built.contentType,
+    cleanAsciiFilename: options.cleanAsciiFilename,
+    safeFilename: options.safeFilename,
+  });
+}
+
+async function transcodeVideoViaTempFallback(options: {
+  mediaUrl: string;
+  audioUrl?: string;
+  scaleHeight?: number;
+  clientCookies?: string;
+  res: Response;
+  req: Request;
+  cleanAsciiFilename?: string;
+  safeFilename?: string;
+}) {
+  const {
+    mediaUrl,
+    audioUrl,
+    scaleHeight,
+    clientCookies,
+    res,
+    req,
+    cleanAsciiFilename,
+    safeFilename,
+  } = options;
+  const videoTmp = tempManager.getTempFilePath('mp4');
+  const audioTmp = tempManager.getTempFilePath('m4a');
+  const outputTmp = tempManager.getTempFilePath('mp4');
   const abortCtrl = new AbortController();
   const onReqClose = () => abortCtrl.abort();
   req.on('close', onReqClose);
 
   try {
-    const isHls = isHlsStreamUrl(mediaUrl);
-    if (!isHls) {
-      let { response: upstreamRes } = await safeFetch(mediaUrl, {
-        headers: upstreamHeaders,
-        signal: abortCtrl.signal,
-      });
+    const parsedVideoUrl = new URL(mediaUrl);
+    const videoHeaders = buildUpstreamHeaders(parsedVideoUrl, clientCookies);
+    videoHeaders['Accept-Encoding'] = 'identity';
+    const videoIsHls = isHlsStreamUrl(mediaUrl);
 
-      if (upstreamRes.status === 401 || upstreamRes.status === 403) {
-        await upstreamRes.body?.cancel().catch(() => {});
-        const retryFetch = await safeFetch(mediaUrl, {
-          headers: {
-            'User-Agent': upstreamHeaders['User-Agent'] || 'Mozilla/5.0',
-            Accept: '*/*',
-          },
-          signal: abortCtrl.signal,
-        });
-        upstreamRes = retryFetch.response;
-      }
-
-      if (!upstreamRes.ok || !upstreamRes.body) {
+    if (!videoIsHls) {
+      const dlV = await downloadToTempFile(mediaUrl, videoHeaders, videoTmp.filePath, abortCtrl.signal);
+      if (!dlV.ok) {
         if (!res.headersSent) {
-          res.status(upstreamRes.status || 502).json({
-            error: `Upstream audio source returned HTTP ${upstreamRes.status}. Please re-extract the URL.`,
+          res.status(dlV.status || 502).json({
+            error: `Upstream video source returned HTTP ${dlV.status || 502}. Please re-extract the URL.`,
           });
         }
         return;
       }
-
-      const fileWriteStream = fs.createWriteStream(inputTmp.filePath);
-      const readable = Readable.fromWeb(upstreamRes.body as any);
-      await new Promise<void>((resolve, reject) => {
-        readable.on('error', reject);
-        fileWriteStream.on('error', reject);
-        fileWriteStream.on('finish', resolve);
-        readable.pipe(fileWriteStream);
-      });
     }
 
-    const inputSource = isHls ? mediaUrl : inputTmp.filePath;
-    const extraInputArgs = isHls
-      ? buildFfmpegHttpArgs(new URL(mediaUrl), upstreamHeaders['Cookie'], true)
-      : [];
+    let hasExternalAudio = false;
+    const audioIsHls = Boolean(audioUrl && isHlsStreamUrl(audioUrl));
+    if (audioUrl && audioUrl !== mediaUrl) {
+      if (!audioIsHls) {
+        const parsedAudioUrl = new URL(audioUrl);
+        const audioHeaders = buildUpstreamHeaders(parsedAudioUrl, clientCookies);
+        audioHeaders['Accept-Encoding'] = 'identity';
+        const dlA = await downloadToTempFile(audioUrl, audioHeaders, audioTmp.filePath, abortCtrl.signal);
+        if (dlA.ok) {
+          hasExternalAudio = true;
+        }
+      } else {
+        hasExternalAudio = true;
+      }
+    }
 
-    const ffConvert = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
-      const codecArgs =
-        format === 'm4a'
-          ? ['-c:a', 'aac', '-b:a', bitrate, '-ar', '44100', '-ac', '2', '-movflags', '+faststart']
-          : ['-c:a', 'libmp3lame', '-b:a', bitrate, '-ar', '44100', '-ac', '2', '-id3v2_version', '3', '-write_xing', '1'];
+    if (abortCtrl.signal.aborted || req.destroyed) return;
 
-      const args = [
-        '-nostdin',
-        '-y',
-        '-hide_banner',
-        '-loglevel', 'error',
-        ...extraInputArgs,
-        '-i', inputSource,
-        '-vn',
-        '-map', '0:a:0',
-        ...codecArgs,
-        outputTmp.filePath,
-      ];
-      const proc = spawn(getFfmpegPath(), args);
+    const videoInput = videoIsHls ? mediaUrl : videoTmp.filePath;
+    const videoExtraArgs = videoIsHls ? buildFfmpegHttpArgs(parsedVideoUrl, clientCookies, true) : [];
+    const audioExtraArgs =
+      hasExternalAudio && audioUrl && audioIsHls
+        ? buildFfmpegHttpArgs(new URL(audioUrl), clientCookies, true)
+        : [];
+    const audioInput = hasExternalAudio && audioUrl ? (audioIsHls ? audioUrl : audioTmp.filePath) : null;
+
+    const needsScale = Boolean(scaleHeight && scaleHeight <= 720);
+    const maxRate = scaleHeight && scaleHeight <= 360 ? '360k' : scaleHeight && scaleHeight <= 480 ? '620k' : '1300k';
+    const bufSize = scaleHeight && scaleHeight <= 360 ? '720k' : scaleHeight && scaleHeight <= 480 ? '1240k' : '2600k';
+
+    const ffArgs: string[] = [
+      '-nostdin',
+      '-y',
+      '-hide_banner',
+      '-loglevel',
+      'error',
+      '-threads',
+      '0',
+      ...videoExtraArgs,
+      '-i',
+      videoInput,
+      ...(audioInput ? [...audioExtraArgs, '-i', audioInput] : []),
+      '-map',
+      '0:v:0',
+      '-map',
+      audioInput ? '1:a:0?' : '0:a:0?',
+      ...(needsScale
+        ? [
+            '-vf',
+            `scale=w='if(gt(iw,ih),-2,trunc(min(iw,${scaleHeight})/2)*2)':h='if(gt(iw,ih),trunc(min(ih,${scaleHeight})/2)*2,-2)'`,
+            '-c:v',
+            'libx264',
+            '-pix_fmt',
+            'yuv420p',
+            '-preset',
+            'ultrafast',
+            '-tune',
+            'zerolatency',
+            '-crf',
+            scaleHeight && scaleHeight <= 360 ? '30' : scaleHeight && scaleHeight <= 480 ? '28' : '26',
+            '-maxrate',
+            maxRate,
+            '-bufsize',
+            bufSize,
+          ]
+        : videoIsHls
+          ? ['-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '24']
+          : ['-c:v', 'copy']),
+      '-c:a',
+      'aac',
+      '-b:a',
+      scaleHeight && scaleHeight <= 360 ? '96k' : scaleHeight && scaleHeight <= 480 ? '128k' : '192k',
+      '-movflags',
+      '+faststart',
+      outputTmp.filePath,
+    ];
+
+    const ffResult = await new Promise<{ code: number | null; stderr: string }>((resolve) => {
+      const proc = spawn(getFfmpegPath(), ffArgs);
       let errOut = '';
       proc.stderr.on('data', (d) => {
         errOut += d.toString();
@@ -369,16 +761,9 @@ async function transcodeAudioViaTempFallback(options: {
 
     if (abortCtrl.signal.aborted || req.destroyed) return;
 
-    if (ffConvert.code !== 0 || !fs.existsSync(outputTmp.filePath)) {
-      const noAudio =
-        ffConvert.stderr.includes('does not contain any stream') ||
-        ffConvert.stderr.includes('matches no streams');
+    if (ffResult.code !== 0 || !fs.existsSync(outputTmp.filePath)) {
       if (!res.headersSent) {
-        res.status(noAudio ? 422 : 502).json({
-          error: noAudio
-            ? `This video has no audio track to convert to ${format.toUpperCase()}.`
-            : `Unable to convert audio stream to ${format.toUpperCase()}.`,
-        });
+        res.status(502).json({ error: 'Unable to process video stream into MP4.' });
       }
       return;
     }
@@ -386,17 +771,18 @@ async function transcodeAudioViaTempFallback(options: {
     const stat = fs.statSync(outputTmp.filePath);
     if (stat.size <= 0) {
       if (!res.headersSent) {
-        res.status(502).json({ error: `Converted ${format.toUpperCase()} file was empty.` });
+        res.status(502).json({ error: 'Processed MP4 file was empty.' });
       }
       return;
     }
 
-    sendAttachmentHeaders(
-      res,
-      format === 'm4a' ? 'audio/mp4' : 'audio/mpeg',
-      cleanAsciiFilename,
-      safeFilename
-    );
+    if (cleanAsciiFilename && safeFilename) {
+      sendAttachmentHeaders(res, 'video/mp4', cleanAsciiFilename, safeFilename);
+    } else {
+      res.setHeader('Content-Type', 'video/mp4');
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+    }
     res.setHeader('Content-Length', String(stat.size));
 
     const outStream = fs.createReadStream(outputTmp.filePath);
@@ -407,11 +793,12 @@ async function transcodeAudioViaTempFallback(options: {
     });
   } catch (err: any) {
     if (!abortCtrl.signal.aborted && !res.headersSent) {
-      res.status(502).json({ error: err?.message || 'Audio fallback conversion failed.' });
+      res.status(502).json({ error: err?.message || 'Video fallback conversion failed.' });
     }
   } finally {
     req.off('close', onReqClose);
-    tempManager.safeDelete(inputTmp.filePath);
+    tempManager.safeDelete(videoTmp.filePath);
+    tempManager.safeDelete(audioTmp.filePath);
     tempManager.safeDelete(outputTmp.filePath);
   }
 }
@@ -428,13 +815,25 @@ function spawnHlsToMp4Remux(
   const httpArgs = buildFfmpegHttpArgs(parsedUrl, clientCookies, true);
   const ffArgs = [
     '-hide_banner',
-    '-loglevel', 'error',
+    '-loglevel',
+    'error',
     ...httpArgs,
-    '-i', mediaUrl,
-    '-c', 'copy',
-    '-bsf:a', 'aac_adtstoasc',
-    '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-    '-f', 'mp4',
+    '-i',
+    mediaUrl,
+    '-map',
+    '0:v:0',
+    '-map',
+    '0:a:0?',
+    '-c',
+    'copy',
+    '-bsf:a',
+    'aac_adtstoasc',
+    '-movflags',
+    'frag_keyframe+empty_moov+default_base_moof',
+    '-frag_duration',
+    '500000',
+    '-f',
+    'mp4',
     'pipe:1',
   ];
 
@@ -445,6 +844,16 @@ function spawnHlsToMp4Remux(
     contentType: 'video/mp4',
     cleanAsciiFilename,
     safeFilename,
+    onEmptyFailure: async () => {
+      await transcodeVideoViaTempFallback({
+        mediaUrl,
+        clientCookies,
+        res,
+        req,
+        cleanAsciiFilename,
+        safeFilename,
+      });
+    },
   });
 }
 
@@ -501,7 +910,7 @@ async function startServer() {
     }
     const envUrl = (process.env.SHARED_APP_URL || process.env.APP_URL || '').trim().replace(/\/$/, '');
     if (envUrl && /^https?:\/\//i.test(envUrl)) return envUrl;
-    return 'https://ais-pre-gcwc4scgts426qmkyughvs-721143561104.europe-west2.run.app';
+    return `http://127.0.0.1:${PORT}`;
   };
 
   app.get('/robots.txt', (req: Request, res: Response) => {
@@ -602,7 +1011,7 @@ async function startServer() {
     res.json({
       status: 'ok',
       service: 'WuKong-Vid Core',
-      version: '1.2.0',
+      version: '1.4.0',
       supportedPlatforms: ['tiktok', 'instagram', 'facebook', 'twitter', 'reddit', 'vimeo', 'direct_media'],
       excludedPlatforms: ['youtube'],
       supportedQualities: ['2160p', '1440p', '1080p', '720p', '480p', '360p', 'mp3_320k', 'mp3_192k', 'mp3_128k', 'm4a_256k'],
@@ -695,6 +1104,10 @@ async function startServer() {
 
       const origin = resolvePublicOrigin(req);
       const preferred = typeof req.body?.preferred_quality === 'string' ? req.body.preferred_quality : '1080p';
+      const formatFilter =
+        req.body?.format_filter === 'video' || req.body?.format_filter === 'audio'
+          ? req.body.format_filter
+          : 'all';
       const cookies =
         (typeof req.body?.cookies === 'string' ? req.body.cookies : undefined) ||
         (req.headers['x-cookies'] as string) ||
@@ -713,7 +1126,7 @@ async function startServer() {
             return { url: cleanUrl, success: false, error: extracted.error || 'Extraction failed' };
           }
           const meta = extracted.data;
-          const quickLinks = buildQuickLinksMap(origin, cleanUrl, meta.title, meta.qualities, preferred);
+          const quickLinks = buildQuickLinksMap(origin, cleanUrl, meta.title, meta.qualities, preferred, formatFilter);
           const rec = selectRecommendedQuality(meta.qualities, preferred);
           return {
             url: cleanUrl,
@@ -767,7 +1180,48 @@ async function startServer() {
         undefined;
       const parsedMediaUrl = new URL(mediaUrl);
 
-      // If separate audioUrl is provided, mux audio and video in real-time with FFmpeg
+      // If format is MP3 or M4A, serve cached seekable audio with Content-Length + 206 Range support for <audio> preview
+      if (format === 'mp3' || format === 'm4a') {
+        const previewBitrate = sanitizeAudioBitrate(
+          req.query.bitrate as string | undefined,
+          format === 'm4a' ? '256k' : '320k'
+        );
+
+        let validAudioFallback: string | undefined;
+        if (audioUrl && audioUrl !== mediaUrl) {
+          const fallbackSafe = await validateSafeUrl(audioUrl);
+          if (fallbackSafe.safe && validateFfmpegRemoteUrl(audioUrl)) {
+            validAudioFallback = audioUrl;
+          }
+        }
+
+        const audioCacheKey = `${format}:${previewBitrate}:${mediaUrl}|${validAudioFallback || ''}`;
+        const built = await buildTranscodedAudioFile({
+          cacheKey: audioCacheKey,
+          mediaUrl,
+          audioFallbackUrl: validAudioFallback,
+          clientCookies,
+          format,
+          bitrate: previewBitrate,
+        });
+
+        if (req.destroyed || res.writableEnded) return;
+        if ('error' in built) {
+          res.status(built.status).json({ error: built.error });
+          return;
+        }
+
+        serveRangedTempFile({
+          req,
+          res,
+          filePath: built.filePath,
+          size: built.size,
+          contentType: built.contentType,
+        });
+        return;
+      }
+
+      // If separate audioUrl is provided for a video format, mux audio and video in real-time with FFmpeg
       if (audioUrl && audioUrl !== mediaUrl) {
         const audioValidation = await validateSafeUrl(audioUrl);
         if (!audioValidation.safe || !validateFfmpegRemoteUrl(audioUrl)) {
@@ -786,10 +1240,13 @@ async function startServer() {
           '-i', mediaUrl,
           ...audioHttpArgs,
           '-i', audioUrl,
+          '-map', '0:v:0',
+          '-map', '1:a:0?',
           '-c:v', 'copy',
           '-c:a', 'aac',
           '-b:a', '192k',
           '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+          '-frag_duration', '500000',
           '-f', 'mp4',
           'pipe:1',
         ];
@@ -799,75 +1256,15 @@ async function startServer() {
           res,
           req,
           contentType: 'video/mp4',
-        });
-        return;
-      }
-
-      // If format is MP3 or M4A, stream direct native MP3 or transcode audio in real-time
-      if (format === 'mp3' || format === 'm4a') {
-        const previewBitrate = sanitizeAudioBitrate(
-          req.query.bitrate as string | undefined,
-          format === 'm4a' ? '256k' : '320k'
-        );
-        const upstreamHeaders = buildUpstreamHeaders(parsedMediaUrl, clientCookies);
-        const isHls = isHlsStreamUrl(mediaUrl);
-
-        if (format === 'mp3' && previewBitrate === '320k' && !isHls && (parsedMediaUrl.pathname.toLowerCase().endsWith('.mp3') || mediaUrl.includes('mime_type=audio_mpeg'))) {
-          try {
-            const { response: directAudio } = await safeFetch(mediaUrl, { headers: upstreamHeaders });
-            const ct = (directAudio.headers.get('content-type') || '').toLowerCase();
-            if (directAudio.ok && directAudio.body && ct.includes('audio/')) {
-              res.setHeader('Content-Type', 'audio/mpeg');
-              res.setHeader('Access-Control-Allow-Origin', '*');
-              res.setHeader('X-Content-Type-Options', 'nosniff');
-              const len = directAudio.headers.get('content-length');
-              if (len) res.setHeader('Content-Length', len);
-              const stream = Readable.fromWeb(directAudio.body as any);
-              req.on('close', () => stream.destroy());
-              stream.pipe(res);
-              return;
-            }
-          } catch {}
-        }
-
-        const httpArgs = buildFfmpegHttpArgs(parsedMediaUrl, clientCookies, isHls);
-        const ffArgs =
-          format === 'm4a'
-            ? [
-                '-hide_banner',
-                '-loglevel', 'error',
-                ...httpArgs,
-                '-i', mediaUrl,
-                '-vn',
-                '-map', '0:a:0',
-                '-c:a', 'aac',
-                '-b:a', previewBitrate,
-                '-ar', '44100',
-                '-ac', '2',
-                '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
-                '-f', 'mp4',
-                'pipe:1',
-              ]
-            : [
-                '-hide_banner',
-                '-loglevel', 'error',
-                ...httpArgs,
-                '-i', mediaUrl,
-                '-vn',
-                '-map', '0:a:0',
-                '-c:a', 'libmp3lame',
-                '-b:a', previewBitrate,
-                '-ar', '44100',
-                '-ac', '2',
-                '-f', 'mp3',
-                'pipe:1',
-              ];
-
-        spawnGuardedFfmpegStream({
-          ffArgs,
-          res,
-          req,
-          contentType: format === 'm4a' ? 'audio/mp4' : 'audio/mpeg',
+          onEmptyFailure: async () => {
+            await transcodeVideoViaTempFallback({
+              mediaUrl,
+              audioUrl,
+              clientCookies,
+              res,
+              req,
+            });
+          },
         });
         return;
       }
@@ -1018,45 +1415,125 @@ async function startServer() {
       // 1. Audio Download: MP3 (320k/192k/128k) OR M4A AAC (256k)
       if (format === 'mp3' || format === 'm4a') {
         const isHls = isHlsStreamUrl(mediaUrl);
+
+        let validAudioFallback: string | undefined;
+        if (audioUrl && audioUrl !== mediaUrl) {
+          const fallbackValidation = await validateSafeUrl(audioUrl);
+          if (fallbackValidation.safe && validateFfmpegRemoteUrl(audioUrl)) {
+            validAudioFallback = audioUrl;
+          }
+        }
+
+        const audioCacheKey = `${format}:${bitrate}:${mediaUrl}|${validAudioFallback || ''}`;
+        const cachedAudio = getCachedAudioEntry(audioCacheKey);
+        if (cachedAudio) {
+          serveRangedTempFile({
+            req,
+            res,
+            filePath: cachedAudio.filePath,
+            size: cachedAudio.size,
+            contentType: cachedAudio.contentType,
+            cleanAsciiFilename,
+            safeFilename,
+          });
+          return;
+        }
+
         const looksDirectMp3 =
           format === 'mp3' &&
           bitrate === '320k' &&
           !isHls &&
-          (parsedUrl.pathname.toLowerCase().endsWith('.mp3') ||
-            mediaUrl.toLowerCase().includes('mime_type=audio_mpeg') ||
-            mediaUrl.toLowerCase().includes('audio/mpeg'));
+          parsedUrl.pathname.toLowerCase().endsWith('.mp3');
 
         if (looksDirectMp3) {
           try {
             const { response: directAudioRes } = await safeFetch(mediaUrl, {
               headers: upstreamHeaders,
+              signal: AbortSignal.timeout(8000),
             });
             const directType = (directAudioRes.headers.get('content-type') || '').toLowerCase();
+            const lenNum = parseInt(directAudioRes.headers.get('content-length') || '0', 10);
             if (
               directAudioRes.ok &&
               directAudioRes.body &&
-              (directType.includes('audio/') || directType === 'application/octet-stream')
+              (directType.includes('audio/mpeg') || directType.includes('audio/mp3')) &&
+              (lenNum === 0 || lenNum > 512)
             ) {
-              sendAttachmentHeaders(res, 'audio/mpeg', cleanAsciiFilename, safeFilename);
-              const contentLength = directAudioRes.headers.get('content-length');
-              if (contentLength) {
-                res.setHeader('Content-Length', contentLength);
+              const reader = directAudioRes.body.getReader();
+              const first = await reader.read();
+              const b = first.value;
+              const isValidMp3Head =
+                b &&
+                b.length >= 3 &&
+                ((b[0] === 0x49 && b[1] === 0x44 && b[2] === 0x33) ||
+                  (b[0] === 0xff && (b[1] & 0xe0) === 0xe0));
+              if (isValidMp3Head) {
+                sendAttachmentHeaders(res, 'audio/mpeg', cleanAsciiFilename, safeFilename);
+                if (lenNum > 0) res.setHeader('Content-Length', String(lenNum));
+                res.write(b);
+                const audioStream = new Readable({
+                  async read() {
+                    try {
+                      const next = await reader.read();
+                      if (next.done) this.push(null);
+                      else this.push(next.value);
+                    } catch (e: any) {
+                      this.destroy(e);
+                    }
+                  },
+                });
+                req.on('close', () => {
+                  reader.cancel().catch(() => {});
+                  audioStream.destroy();
+                });
+                audioStream.pipe(res);
+                return;
               }
-              const audioStream = Readable.fromWeb(directAudioRes.body as any);
-              audioStream.on('error', () => {
-                if (!res.headersSent) res.status(502).json({ error: 'Audio stream interrupted.' });
-                else res.end();
-              });
-              req.on('close', () => audioStream.destroy());
-              audioStream.pipe(res);
-              return;
+              await reader.cancel().catch(() => {});
+            } else {
+              await directAudioRes.body?.cancel().catch(() => {});
             }
           } catch (directMp3Err) {
             console.warn('Direct MP3 pass-through fallback notice:', directMp3Err);
           }
         }
 
-        const httpArgs = buildFfmpegHttpArgs(parsedUrl, clientCookies, isHls);
+        const isVideoOnlyMedia =
+          mediaUrl.includes('/DASH_') || mediaUrl.includes('bytestart=') || mediaUrl.includes('mime_type=video');
+        const pipePrimaryUrl = validAudioFallback && isVideoOnlyMedia ? validAudioFallback : mediaUrl;
+        const pipeIsHls = isHlsStreamUrl(pipePrimaryUrl);
+
+        const existingAudioBuild = audioBuildInFlight.get(audioCacheKey);
+        if (!pipeIsHls || existingAudioBuild) {
+          const built = await buildTranscodedAudioFile({
+            cacheKey: audioCacheKey,
+            mediaUrl,
+            audioFallbackUrl: validAudioFallback,
+            clientCookies,
+            format,
+            bitrate,
+          });
+          if (req.destroyed || res.writableEnded) return;
+          if ('error' in built) {
+            if (!res.headersSent) {
+              res.status(built.status).json({ error: built.error });
+            }
+            return;
+          }
+          serveRangedTempFile({
+            req,
+            res,
+            filePath: built.filePath,
+            size: built.size,
+            contentType: built.contentType,
+            cleanAsciiFilename,
+            safeFilename,
+          });
+          return;
+        }
+
+        const pipePrimaryParsed = new URL(pipePrimaryUrl);
+        const httpArgs = buildFfmpegHttpArgs(pipePrimaryParsed, clientCookies, pipeIsHls);
         const ffArgs =
           format === 'm4a'
             ? [
@@ -1064,7 +1541,7 @@ async function startServer() {
                 '-loglevel', 'error',
                 '-threads', '0',
                 ...httpArgs,
-                '-i', mediaUrl,
+                '-i', pipePrimaryUrl,
                 '-vn', '-sn', '-dn',
                 '-map', '0:a:0',
                 '-c:a', 'aac',
@@ -1072,6 +1549,7 @@ async function startServer() {
                 '-ar', '44100',
                 '-ac', '2',
                 '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+                '-frag_duration', '500000',
                 '-f', 'mp4',
                 'pipe:1',
               ]
@@ -1080,11 +1558,12 @@ async function startServer() {
                 '-loglevel', 'error',
                 '-threads', '0',
                 ...httpArgs,
-                '-i', mediaUrl,
+                '-i', pipePrimaryUrl,
                 '-vn', '-sn', '-dn',
                 '-map', '0:a:0',
                 '-c:a', 'libmp3lame',
                 '-b:a', bitrate,
+                '-compression_level', '7',
                 '-ar', '44100',
                 '-ac', '2',
                 '-id3v2_version', '3',
@@ -1101,18 +1580,22 @@ async function startServer() {
           cleanAsciiFilename,
           safeFilename,
           onEmptyFailure: async (stderrLog) => {
-            if (
-              stderrLog.includes('does not contain any stream') ||
-              stderrLog.includes('matches no streams')
-            ) {
+            const noAudioOnly =
+              !validAudioFallback &&
+              (stderrLog.includes('does not contain any stream') ||
+                stderrLog.includes('matches no streams'));
+            if (noAudioOnly) {
               if (!res.headersSent) {
                 res.status(422).json({ error: `This video has no audio track to convert to ${format.toUpperCase()}.` });
               }
               return;
             }
             await transcodeAudioViaTempFallback({
+              cacheKey: audioCacheKey,
               mediaUrl,
+              audioFallbackUrl: validAudioFallback,
               upstreamHeaders,
+              clientCookies,
               res,
               req,
               cleanAsciiFilename,
@@ -1144,10 +1627,12 @@ async function startServer() {
                 `scale=w='if(gt(iw,ih),-2,trunc(min(iw,${scaleHeight})/2)*2)':h='if(gt(iw,ih),trunc(min(ih,${scaleHeight})/2)*2,-2)'`,
                 '-c:v', 'libx264',
                 '-pix_fmt', 'yuv420p',
-                '-preset', 'veryfast',
-                '-crf', scaleHeight <= 360 ? '30' : '28',
-                '-maxrate', scaleHeight <= 360 ? '360k' : '620k',
-                '-bufsize', scaleHeight <= 360 ? '720k' : '1240k',
+                '-preset', 'ultrafast',
+                '-tune', 'zerolatency',
+                '-g', '48',
+                '-crf', scaleHeight <= 360 ? '30' : scaleHeight <= 480 ? '28' : '26',
+                '-maxrate', scaleHeight <= 360 ? '360k' : scaleHeight <= 480 ? '620k' : '1300k',
+                '-bufsize', scaleHeight <= 360 ? '720k' : scaleHeight <= 480 ? '1240k' : '2600k',
                 '-threads', '0',
               ]
             : ['-c:v', 'copy'];
@@ -1159,10 +1644,13 @@ async function startServer() {
           '-i', mediaUrl,
           ...audioHttpArgs,
           '-i', audioUrl,
+          '-map', '0:v:0',
+          '-map', '1:a:0?',
           ...scaleArgs,
           '-c:a', 'aac',
           '-b:a', scaleHeight && scaleHeight <= 360 ? '96k' : scaleHeight && scaleHeight <= 480 ? '128k' : '192k',
           '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+          '-frag_duration', '500000',
           '-f', 'mp4',
           'pipe:1',
         ];
@@ -1174,11 +1662,23 @@ async function startServer() {
           contentType: 'video/mp4',
           cleanAsciiFilename,
           safeFilename,
+          onEmptyFailure: async () => {
+            await transcodeVideoViaTempFallback({
+              mediaUrl,
+              audioUrl,
+              scaleHeight,
+              clientCookies,
+              res,
+              req,
+              cleanAsciiFilename,
+              safeFilename,
+            });
+          },
         });
         return;
       }
 
-      // 3. Scaled Compact MP4 Transcoding (480p SD / 360p Mobile Saver / 720p when requested on single-stream sources)
+      // 3. Scaled Compact MP4 Transcoding (720p / 480p SD / 360p Mobile Saver when requested)
       if (scaleHeight && scaleHeight <= 720) {
         const httpArgs = buildFfmpegHttpArgs(parsedUrl, clientCookies, isHlsStreamUrl(mediaUrl));
         const maxRate = scaleHeight <= 360 ? '360k' : scaleHeight <= 480 ? '620k' : '1300k';
@@ -1189,17 +1689,22 @@ async function startServer() {
           '-threads', '0',
           ...httpArgs,
           '-i', mediaUrl,
+          '-map', '0:v:0',
+          '-map', '0:a:0?',
           '-vf',
           `scale=w='if(gt(iw,ih),-2,trunc(min(iw,${scaleHeight})/2)*2)':h='if(gt(iw,ih),trunc(min(ih,${scaleHeight})/2)*2,-2)'`,
           '-c:v', 'libx264',
           '-pix_fmt', 'yuv420p',
-          '-preset', 'veryfast',
+          '-preset', 'ultrafast',
+          '-tune', 'zerolatency',
+          '-g', '48',
           '-crf', scaleHeight <= 360 ? '30' : scaleHeight <= 480 ? '28' : '26',
           '-maxrate', maxRate,
           '-bufsize', bufSize,
           '-c:a', 'aac',
           '-b:a', scaleHeight <= 360 ? '96k' : scaleHeight <= 480 ? '128k' : '160k',
           '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+          '-frag_duration', '500000',
           '-f', 'mp4',
           'pipe:1',
         ];
@@ -1211,6 +1716,17 @@ async function startServer() {
           contentType: 'video/mp4',
           cleanAsciiFilename,
           safeFilename,
+          onEmptyFailure: async () => {
+            await transcodeVideoViaTempFallback({
+              mediaUrl,
+              scaleHeight,
+              clientCookies,
+              res,
+              req,
+              cleanAsciiFilename,
+              safeFilename,
+            });
+          },
         });
         return;
       }
@@ -1369,6 +1885,41 @@ async function startServer() {
       const meta = extracted.data;
       const chosen = selectRecommendedQuality(meta.qualities, quality) || meta.qualities[0];
       const baseFilename = customFilename || meta.title || 'wukong_vid_media';
+      const qLower = quality.toLowerCase();
+      const requestedAudioFmt =
+        qLower === 'm4a' || qLower.startsWith('m4a_')
+          ? 'm4a'
+          : qLower === 'mp3' || qLower.startsWith('mp3_')
+            ? 'mp3'
+            : undefined;
+      const requestedAudioBitrate =
+        qLower === 'mp3_192k'
+          ? '192k'
+          : qLower === 'mp3_128k'
+            ? '128k'
+            : qLower === 'm4a_256k'
+              ? '256k'
+              : requestedAudioFmt === 'mp3'
+                ? '320k'
+                : undefined;
+
+      if (requestedAudioFmt && chosen.format !== 'mp3' && chosen.format !== 'm4a' && chosen.hasAudio === false) {
+        res.status(422).json({ error: `This video has no audio track to convert to ${requestedAudioFmt.toUpperCase()}.` });
+        return;
+      }
+
+      const requestedScale =
+        !requestedAudioFmt && /^\d{3,4}p$/i.test(qLower)
+          ? parseInt(qLower.replace('p', ''), 10)
+          : undefined;
+      const effectiveScaleHeight =
+        requestedScale &&
+        requestedScale <= 720 &&
+        !chosen.resolution.toLowerCase().includes(`${requestedScale}p`)
+          ? String(requestedScale)
+          : chosen.format === 'mp4' && chosen.targetHeight && chosen.targetHeight <= 720 && !chosen.isNative
+            ? String(chosen.targetHeight)
+            : undefined;
 
       await streamMediaDownload({
         req,
@@ -1376,12 +1927,9 @@ async function startServer() {
         mediaUrl: chosen.url,
         audioUrl: chosen.audioUrl,
         rawFilename: baseFilename,
-        rawFormat: chosen.format,
-        rawBitrate: chosen.bitrateKbps ? `${chosen.bitrateKbps}k` : undefined,
-        rawScaleHeight:
-          chosen.format === 'mp4' && chosen.targetHeight && chosen.targetHeight <= 720 && !chosen.isNative
-            ? String(chosen.targetHeight)
-            : undefined,
+        rawFormat: requestedAudioFmt || chosen.format,
+        rawBitrate: requestedAudioBitrate || (chosen.bitrateKbps ? `${chosen.bitrateKbps}k` : undefined),
+        rawScaleHeight: effectiveScaleHeight,
         fileSizeBytes: chosen.fileSizeBytes ? String(chosen.fileSizeBytes) : '',
       });
     } catch (err: any) {
@@ -1733,6 +2281,28 @@ async function startServer() {
       details: `Allowed 2/2, blocked 3rd with HTTP ${r3.statusCode} (Retry-After: ${r3.headers['Retry-After']}s)`,
     });
 
+    const jsBlocked = sanitizeHttpUrl('javascript:alert(document.cookie)') === '';
+    const dataBlocked = sanitizeHttpUrl('data:text/html,<script>alert(1)</script>') === '';
+    const credsBlocked = sanitizeHttpUrl('https://user:pass@example.com/video.mp4') === '';
+    const validKept = sanitizeHttpUrl('https://cdn.example.com/media.mp4') === 'https://cdn.example.com/media.mp4';
+    checks.push({
+      id: 'sec_uri_sanitization',
+      name: 'URI Scheme & Credential Sanitization',
+      category: 'XSS & Redirect Guard',
+      passed: jsBlocked && dataBlocked && credsBlocked && validKept,
+      details: 'Rejected javascript:, data:, and userinfo credentials; preserved safe HTTPS',
+    });
+
+    const packedSample = `eval(function(p,a,c,k,e,d){e=function(c){return c};if(!''.replace(/^/,String)){while(c--){d[c]=k[c]||c}k=[function(e){return d[e]}];e=function(){return'\\\\w+'};c=1};while(c--){if(k[c]){p=p.replace(new RegExp('\\\\b'+e(c)+'\\\\b','g'),k[c])}}return p}('0("1")',2,2,'alert|ok'.split('|'),0,{}))`;
+    const unpackedSample = unpackPackedJs(packedSample);
+    checks.push({
+      id: 'sec_non_eval_unpacker',
+      name: 'Deterministic Non-Eval JS Unpacker',
+      category: 'Code Execution Defense',
+      passed: unpackedSample === 'alert("ok")',
+      details: `Unpacked without eval/new Function: "${unpackedSample}"`,
+    });
+
     const passedTotal = checks.filter((c) => c.passed).length;
     res.json({
       timestamp: new Date().toISOString(),
@@ -1943,7 +2513,11 @@ async function startServer() {
         const qualitiesFound = extracted.data.qualities.map((q) => q.resolution);
         const chosen =
           (scaleHeight
-            ? extracted.data.qualities.find((q) => q.targetHeight === scaleHeight)
+            ? extracted.data.qualities.find(
+                (q) =>
+                  q.format === format &&
+                  (q.targetHeight === scaleHeight || q.resolution.toLowerCase().includes(`${scaleHeight}p`))
+              )
             : undefined) ||
           (bitrate
             ? extracted.data.qualities.find(
@@ -1953,6 +2527,11 @@ async function startServer() {
           extracted.data.qualities.find((q) => q.format === format) ||
           extracted.data.qualities[0];
 
+        const effectiveScaleHeight =
+          scaleHeight && !chosen.resolution.toLowerCase().includes(`${scaleHeight}p`)
+            ? scaleHeight
+            : undefined;
+
         const probe = await probeDownloadBytes(
           chosen.url,
           format,
@@ -1960,7 +2539,7 @@ async function startServer() {
           25000,
           false,
           bitrate || (chosen.bitrateKbps ? `${chosen.bitrateKbps}k` : undefined),
-          scaleHeight
+          effectiveScaleHeight
         );
         const latencyMs = Math.round(performance.now() - start);
 
@@ -1985,7 +2564,7 @@ async function startServer() {
           latencyMs,
           bytesVerified: probe.bytesRead,
           qualitiesFound,
-          details: `${qualitiesFound.length} tiers ready · Streamed ${probe.bytesRead} B (${probe.contentType || format}${bitrate ? ` @ ${bitrate}` : scaleHeight ? ` @ ${scaleHeight}p` : ''})`,
+          details: `${qualitiesFound.length} tiers ready · Streamed ${probe.bytesRead} B (${probe.contentType || format}${bitrate ? ` @ ${bitrate}` : effectiveScaleHeight ? ` @ ${effectiveScaleHeight}p` : ''})`,
         };
       } catch (err: any) {
         return {
@@ -2021,7 +2600,7 @@ async function startServer() {
       () => runExtractAndDownloadTest('mp4_16', 'MP4 #16 · Compact 480p Scaled Transcode', '480p SD MP4', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp4', false, undefined, 480),
       () => runExtractAndDownloadTest('mp4_17', 'MP4 #17 · Data Saver 360p Scaled MP4', '360p Mobile', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp4', false, undefined, 360),
 
-      // 12 Audio Checks (10 MP3 320k + 1 MP3 128k Compact + 1 M4A 256k AAC)
+      // Audio Checks (MP3 320k/192k/128k + M4A 256k AAC + HLS)
       () => runExtractAndDownloadTest('mp3_01', 'MP3 #1 · TikTok Sound 320k (@scout2015)', 'TikTok MP3', 'https://www.tiktok.com/@scout2015/video/6718335390845095173', 'mp3'),
       () => runExtractAndDownloadTest('mp3_02', 'MP3 #2 · TikTok Sound 320k (@tiktok #1)', 'TikTok MP3', 'https://www.tiktok.com/@tiktok/video/7106594312292453675', 'mp3'),
       () => runExtractAndDownloadTest('mp3_03', 'MP3 #3 · TikTok Mobile Sound 320k', 'TikTok MP3', 'https://m.tiktok.com/v/6718335390845095173.html', 'mp3'),
@@ -2035,6 +2614,7 @@ async function startServer() {
       () => runExtractAndDownloadTest('mp3_11', 'MP3 #11 · Balanced 192kbps MP3 Audio', 'MP3 192k', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp3', false, '192k'),
       () => runExtractAndDownloadTest('mp3_12', 'MP3 #12 · Compact 128kbps MP3 Audio', 'MP3 128k', 'https://www.w3schools.com/html/mov_bbb.mp4', 'mp3', false, '128k'),
       () => runExtractAndDownloadTest('m4a_13', 'M4A #13 · High-Efficiency 256kbps AAC', 'M4A 256k', 'https://www.w3schools.com/html/mov_bbb.mp4', 'm4a', false, '256k'),
+      () => runExtractAndDownloadTest('m4a_14', 'M4A #14 · HLS .m3u8 -> M4A 256k AAC', 'HLS M4A', 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8', 'm4a', false, '256k'),
 
       // Stream Cancellation Control Check
       async (): Promise<DownloadCheckResult> => {

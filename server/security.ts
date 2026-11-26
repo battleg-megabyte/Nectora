@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import dns from 'dns/promises';
 import net from 'net';
 import path from 'path';
@@ -258,6 +259,177 @@ export function validateFfmpegRemoteUrl(url: string): boolean {
   return url.startsWith('https://') || url.startsWith('http://');
 }
 
+/**
+ * Sanitizes untrusted external URLs (thumbnails, avatars, profiles, extracted media links),
+ * rejecting dangerous schemes such as javascript:, data:, vbscript:, file:, or CRLF payloads.
+ */
+export function sanitizeHttpUrl(raw?: string | null): string {
+  if (!raw || typeof raw !== 'string') return '';
+  const trimmed = raw.replace(/[\x00-\x1f\x7f]/g, '').trim();
+  if (!trimmed || trimmed.length > 8192) return '';
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return '';
+    }
+    if (parsed.username || parsed.password) {
+      return '';
+    }
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+const TRACKING_QUERY_PARAMS = new Set([
+  'igsh',
+  'igshid',
+  'fbclid',
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'is_from_webapp',
+  'sender_device',
+  '_r',
+  '_t',
+  'rdid',
+  'share_url',
+]);
+
+/**
+ * Removes benign share-tracking query parameters while preserving media ID parameters (e.g. ?v=123).
+ */
+export function stripTrackingParams(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl.trim());
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (TRACKING_QUERY_PARAMS.has(key.toLowerCase())) {
+        parsed.searchParams.delete(key);
+      }
+    }
+    return parsed.toString();
+  } catch {
+    return rawUrl.trim();
+  }
+}
+
+/**
+ * Pure deterministic unpacker for Dean Edwards (p,a,c,k) and SnapSave (h,u,n,t,e,r)
+ * obfuscated HTML payloads — strictly zero eval() or new Function().
+ */
+export function unpackPackedJs(scriptText: string): string {
+  if (!scriptText || typeof scriptText !== 'string') return '';
+
+  // 1) SnapSave / SnapTik style 6-argument cipher:
+  // eval(function(h,u,n,t,e,r){...}("encoded", uNum, "alphabet", tNum, eBase, 0))
+  const hunterMatch = scriptText.match(
+    /\}\(\s*"((?:[^"\\]|\\.)*)"\s*,\s*(\d+)\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)\s*\)?/
+  );
+  if (hunterMatch) {
+    try {
+      const h = hunterMatch[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      const alphabet = hunterMatch[3].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+      const tOffset = Number(hunterMatch[4]);
+      const base = Number(hunterMatch[5]);
+      if (base >= 2 && base < alphabet.length) {
+        const delim = alphabet[base];
+        const charMap = new Map<string, number>();
+        for (let j = 0; j < alphabet.length; j++) {
+          charMap.set(alphabet[j], j);
+        }
+        const segments = h.split(delim);
+        const bytes: number[] = [];
+        for (const seg of segments) {
+          if (!seg) continue;
+          let val = 0;
+          let valid = true;
+          for (let i = 0; i < seg.length; i++) {
+            const digit = charMap.get(seg[i]);
+            if (digit === undefined) {
+              valid = false;
+              break;
+            }
+            val = val * base + digit;
+          }
+          if (valid) {
+            const code = val - tOffset;
+            if (code >= 0 && code <= 255) {
+              bytes.push(code);
+            } else if (code > 255) {
+              return decodeHtmlFromUtf8Chars(segments, charMap, base, tOffset);
+            }
+          }
+        }
+        if (bytes.length > 0) {
+          return Buffer.from(bytes).toString('utf8');
+        }
+      }
+    } catch {
+      // Fall through cleanly
+    }
+  }
+
+  // 2) Dean Edwards Packer: }('packed',radix,count,'dict|words'.split('|'),0,{})
+  const pMatch = scriptText.match(
+    /\}\(\s*(['"])((?:\\.|(?!\1)[\s\S])*)\1\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(['"])((?:\\.|(?!\5)[\s\S])*)\5\.split\(\s*(['"])\|\7\s*\)/
+  );
+  if (pMatch) {
+    try {
+      const packed = pMatch[2].replace(/\\(['"\\])/g, '$1');
+      const radix = Number(pMatch[3]) || 36;
+      const dict = pMatch[6].split('|');
+      return packed.replace(/\b[0-9a-zA-Z]+\b/g, (token) => {
+        const idx = parseBaseInt(token, radix);
+        return idx >= 0 && idx < dict.length && dict[idx] ? dict[idx] : token;
+      });
+    } catch {
+      // Fall through cleanly
+    }
+  }
+
+  // 3) Direct innerHTML assignment without packing (sometimes returned unencrypted)
+  const directHtml = scriptText.match(/innerHTML\s*=\s*"((?:[^"\\]|\\.)+)"/);
+  if (directHtml?.[1]) {
+    return directHtml[1].replace(/\\"/g, '"').replace(/\\\//g, '/').replace(/\\n/g, '\n');
+  }
+
+  return '';
+}
+
+function decodeHtmlFromUtf8Chars(
+  segments: string[],
+  charMap: Map<string, number>,
+  base: number,
+  tOffset: number
+): string {
+  let out = '';
+  for (const seg of segments) {
+    if (!seg) continue;
+    let val = 0;
+    for (let i = 0; i < seg.length; i++) {
+      const digit = charMap.get(seg[i]);
+      if (digit === undefined) continue;
+      val = val * base + digit;
+    }
+    const code = val - tOffset;
+    if (code >= 0) out += String.fromCharCode(code);
+  }
+  return out;
+}
+
+function parseBaseInt(token: string, radix: number): number {
+  const digits = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  let result = 0;
+  for (let i = 0; i < token.length; i++) {
+    const val = digits.indexOf(token[i]);
+    if (val < 0 || val >= radix) return -1;
+    result = result * radix + val;
+  }
+  return result;
+}
+
 export function sanitizeMediaFormat(raw?: string): AllowedMediaFormat | null {
   const fmt = (raw || 'mp4').toLowerCase().trim();
   if (fmt === 'mp4' || fmt === 'mp3' || fmt === 'm4a' || fmt === 'webm') {
@@ -344,13 +516,13 @@ export function getPlatformSecurityCookies(platform: string, customCookies?: str
     const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
     let res = '';
     for (let i = 0; i < length; i++) {
-      res += charset.charAt(Math.floor(Math.random() * charset.length));
+      res += charset.charAt(crypto.randomInt(0, charset.length));
     }
     return res;
   };
 
   const randomHex = (len: number) =>
-    Array.from({ length: len }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+    crypto.randomBytes(Math.ceil(len / 2)).toString('hex').slice(0, len);
 
   if (platform === 'facebook') {
     // Parse any existing cookies provided by the client/user
