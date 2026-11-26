@@ -52,7 +52,9 @@ export function WukongBrandMark({
       >
         <div className="relative w-full h-full rounded-full bg-[#100612] overflow-hidden flex items-center justify-center">
           <img
-            src="/monkey-king-icon.jpg"
+            src={size === 'xl' ? '/monkey-king-icon.webp' : '/monkey-king-icon-192.webp'}
+            width={size === 'xl' ? 512 : 192}
+            height={size === 'xl' ? 512 : 192}
             alt="Sun Wukong emblem"
             draggable={false}
             className="w-full h-full object-cover object-center scale-[1.52] brightness-[1.1] contrast-[1.08]"

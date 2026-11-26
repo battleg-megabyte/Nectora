@@ -3,19 +3,18 @@ import { MotionConfig, motion, AnimatePresence } from 'motion/react';
 import { Header } from './components/Header';
 import { PlatformChips } from './components/PlatformChips';
 import { UrlInputBar } from './components/UrlInputBar';
-import { MediaResultCard } from './components/MediaResultCard';
 import { Footer } from './components/Footer';
 import { WukongBrandMark } from './components/WukongBrandMark';
 import { MediaExtractionSkeleton } from './components/WebsiteSkeleton';
 import { MediaMetadata, DownloadHistoryItem, AnalysisStatus } from './types';
-import leftBirdImg from './assets/images/bird_left_lunar_1795712515711.jpg';
-import rightBirdImg from './assets/images/bird_right_lunar_1795712515292.jpg';
+import leftBirdImg from './assets/images/bird_left_lunar_1795712515711.webp';
+import rightBirdImg from './assets/images/bird_right_lunar_1795712515292.webp';
 import {
   HOMEPAGE_SEO,
-  SEO_PAGES,
-  getSeoPageByPath,
+  SEO_NAV_ITEMS,
+  getSeoNavByPath,
   normalizeSeoPath,
-} from '../shared/seoPages';
+} from '../shared/seoNav';
 import {
   AlertCircle,
   ArrowRight,
@@ -27,6 +26,9 @@ import {
   Zap,
 } from 'lucide-react';
 
+const MediaResultCard = lazy(() =>
+  import('./components/MediaResultCard').then((m) => ({ default: m.MediaResultCard }))
+);
 const SeoPageView = lazy(() =>
   import('./components/SeoPageView').then((m) => ({ default: m.SeoPageView }))
 );
@@ -92,7 +94,7 @@ export default function App() {
     } catch {}
   };
 
-  const activeSeoPage = getSeoPageByPath(currentPath);
+  const activeSeoPage = getSeoNavByPath(currentPath);
 
   useEffect(() => {
     const onPopState = () => {
@@ -273,9 +275,10 @@ export default function App() {
           className="fixed inset-0 -z-10 pointer-events-none overflow-hidden bg-[#07020A]"
         >
           <img
-            src="/moon-backdrop-hd.jpg"
+            src="/moon-backdrop-hd.webp"
             alt=""
             decoding="async"
+            fetchPriority="high"
             className="w-full h-full object-cover object-[50%_18%] sm:object-[50%_14%] lg:object-[50%_12%] opacity-90 select-none"
           />
 
@@ -352,10 +355,11 @@ export default function App() {
                   }
                 >
                   <SeoPageView
-                    page={activeSeoPage}
+                    pagePath={activeSeoPage.path}
                     onNavigate={handleNavigate}
                     onOpenMcpModal={() => setMcpOpen(true)}
                     onOpenBatchModal={() => setBatchOpen(true)}
+                    onOpenDiagnosticsModal={() => setDiagnosticsOpen(true)}
                   />
                 </Suspense>
               </motion.div>
@@ -367,14 +371,14 @@ export default function App() {
                 transition={{ duration: 0.18 }}
                 className="w-full flex flex-col items-center"
               >
-                {/* Open Editorial Hero */}
+                {/* Focused Editorial Hero (Emblem, H1, Paste Box, Chips) */}
                 <motion.div
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                  className="relative text-center max-w-3xl mx-auto flex flex-col items-center space-y-3 sm:space-y-3.5 mb-6 sm:mb-7"
+                  className="relative text-center max-w-3xl mx-auto flex flex-col items-center space-y-3 mb-6 sm:mb-7"
                 >
-                  <div className="flex flex-col items-center gap-2">
+                  <div className="flex flex-col items-center gap-1.5">
                     <motion.button
                       type="button"
                       whileHover={{ scale: 1.07, rotate: 1.5 }}
@@ -407,12 +411,6 @@ export default function App() {
                       MP4, MP3, and M4A
                     </span>
                   </h1>
-                  <h2 className="font-display text-sm sm:text-lg font-semibold text-rose-100/95 tracking-tight max-w-2xl mx-auto drop-shadow-[0_2px_14px_rgba(0,0,0,0.8)]">
-                    {HOMEPAGE_SEO.h2}
-                  </h2>
-                  <p className="text-xs sm:text-sm text-rose-50/80 leading-relaxed max-w-xl mx-auto px-1 drop-shadow-[0_2px_12px_rgba(0,0,0,0.8)]">
-                    Extract HD MP4 videos and 320kbps MP3/M4A audio from TikTok, Instagram Reels, Facebook, X, Reddit, Vimeo, Batch Queue, REST API &amp; MCP agents.
-                  </p>
                 </motion.div>
 
                 {/* Responsive Lunar Pill Command Input */}
@@ -424,12 +422,7 @@ export default function App() {
                   onSelectQuality={setSelectedQualityChip}
                 />
 
-                {/* Understated Zero-Liability Disclaimer Line */}
-                <p className="mt-3.5 text-[11px] sm:text-xs text-rose-100/70 text-center max-w-2xl px-2 leading-relaxed drop-shadow-[0_1px_8px_rgba(0,0,0,0.85)]">
-                  {HOMEPAGE_SEO.notice}
-                </p>
-
-                {/* Interactive Supported Sources Strip */}
+                {/* Interactive Supported Sources Strip (Single Row) */}
                 <PlatformChips onNavigate={handleNavigate} />
 
                 {/* Live Extraction Skeleton & Result States */}
@@ -462,13 +455,23 @@ export default function App() {
 
                   {status === 'found' && media && (
                     <div key={media.id} className="w-full">
-                      <MediaResultCard
-                        media={media}
-                        preferredResolution={selectedQualityChip}
-                        onSaveHistory={handleSaveHistory}
-                        onOpenAiAnalysis={() => setAiPanelOpen(true)}
-                        onRegisterBlob={handleRegisterBlob}
-                      />
+                      <Suspense
+                        fallback={
+                          <MediaExtractionSkeleton
+                            stageIndex={2}
+                            stages={EXTRACTION_STAGES}
+                            onStop={handleAbortExtraction}
+                          />
+                        }
+                      >
+                        <MediaResultCard
+                          media={media}
+                          preferredResolution={selectedQualityChip}
+                          onSaveHistory={handleSaveHistory}
+                          onOpenAiAnalysis={() => setAiPanelOpen(true)}
+                          onRegisterBlob={handleRegisterBlob}
+                        />
+                      </Suspense>
                     </div>
                   )}
                 </AnimatePresence>
@@ -574,11 +577,11 @@ export default function App() {
                       <div className="flex items-center gap-2.5">
                         <Zap className="w-4 h-4 text-emerald-300 shrink-0" />
                         <h3 className="font-display font-semibold text-sm sm:text-base text-white">
-                          AI-First MCP &amp; API
+                          Developers &amp; Automation
                         </h3>
                       </div>
                       <p className="text-xs sm:text-[13px] text-rose-100/75 leading-relaxed">
-                        Zero-auth JSON-RPC 2.0 MCP with field projection, cached stream probing, and 1-step binary download routes.
+                        Zero-auth JSON-RPC 2.0 MCP, OpenAPI specs, and 1-step REST download routes for scripts and agents.
                       </p>
                     </div>
                     <div className="flex items-center justify-between gap-4 pt-1">
@@ -590,12 +593,12 @@ export default function App() {
                         {mcpCopiedHero ? (
                           <>
                             <Check className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Copied Contract</span>
+                            <span>Copied Spec</span>
                           </>
                         ) : (
                           <>
                             <Copy className="w-3.5 h-3.5 text-emerald-400" />
-                            <span>Copy AI Contract</span>
+                            <span>Copy API Spec</span>
                           </>
                         )}
                       </button>
@@ -604,7 +607,7 @@ export default function App() {
                         onClick={() => setMcpOpen(true)}
                         className="inline-flex items-center gap-1 py-1 text-xs font-semibold text-rose-200 hover:text-white transition-colors cursor-pointer"
                       >
-                        <span>Open MCP</span>
+                        <span>Developer Tools</span>
                         <ArrowUpRight className="w-3.5 h-3.5" />
                       </button>
                     </div>
@@ -620,7 +623,7 @@ export default function App() {
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-rose-200/65">
                       Guides:
                     </span>
-                    {SEO_PAGES.filter((p) => p.category !== 'legal').map((p) => (
+                    {SEO_NAV_ITEMS.filter((p) => p.category !== 'legal').map((p) => (
                       <a
                         key={p.path}
                         href={p.path}
@@ -636,10 +639,10 @@ export default function App() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setMcpOpen(true)}
+                    onClick={() => handleNavigate('/mcp')}
                     className="text-[11px] font-mono text-emerald-300 hover:text-white transition-colors inline-flex items-center gap-1 cursor-pointer shrink-0"
                   >
-                    <span>MCP &amp; API Spec</span>
+                    <span>Developers</span>
                     <ArrowUpRight className="w-3 h-3" />
                   </button>
                 </nav>

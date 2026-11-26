@@ -1,3 +1,6 @@
+import { HOMEPAGE_SEO, normalizeSeoPath } from './seoNav.js';
+export { HOMEPAGE_SEO, normalizeSeoPath };
+
 export interface SeoSection {
   heading: string;
   paragraphs: string[];
@@ -39,18 +42,7 @@ export interface SeoPageConfig {
   relatedPaths: string[];
 }
 
-export const DEFAULT_PUBLIC_ORIGIN =
-  'https://ais-pre-gcwc4scgts426qmkyughvs-721143561104.europe-west2.run.app';
-
-export const HOMEPAGE_SEO = {
-  title: 'Download Public Videos & Audio | WuKong Vid',
-  description:
-    'Download public videos and audio from TikTok, Instagram, Facebook, X, Reddit and Vimeo in MP4, MP3 or M4A. Fast extraction for creators, editors and AI agents.',
-  h1: 'Download Public Videos & Audio in MP4, MP3, and M4A',
-  h2: 'Fast Media Extraction for Creators, Editors, Developers, and AI Agents',
-  notice:
-    'Download any public videos or audio streams freely at maximum speed. Users bear sole responsibility for downloaded media; WuKong Vid accepts no liability for external content or usage. YouTube URLs are not supported.',
-};
+export const DEFAULT_PUBLIC_ORIGIN = 'http://localhost:3000';
 
 export const SEO_PAGES: SeoPageConfig[] = [
   {
@@ -724,12 +716,6 @@ const downloadUrl = \`{{ORIGIN}}/api/download?url=\${encodeURIComponent(bestMp4.
     relatedPaths: ['/privacy-policy', '/about', '/supported-platforms'],
   },
 ];
-
-export function normalizeSeoPath(pathname: string): string {
-  if (!pathname || pathname === '/') return '/';
-  const cleaned = pathname.replace(/\/+$/, '').toLowerCase();
-  return cleaned || '/';
-}
 
 export function getSeoPageByPath(pathname: string): SeoPageConfig | undefined {
   const norm = normalizeSeoPath(pathname);

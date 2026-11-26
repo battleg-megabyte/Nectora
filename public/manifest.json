@@ -8,9 +8,15 @@
   "theme_color": "#090409",
   "icons": [
     {
-      "src": "/monkey-king-icon.jpg",
+      "src": "/monkey-king-icon-192.webp",
+      "sizes": "192x192",
+      "type": "image/webp",
+      "purpose": "any"
+    },
+    {
+      "src": "/monkey-king-icon.webp",
       "sizes": "512x512",
-      "type": "image/jpeg",
+      "type": "image/webp",
       "purpose": "any"
     },
     {

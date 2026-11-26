@@ -1,7 +1,7 @@
 import { MouseEvent } from 'react';
 import { Layers, CheckCircle2, Cpu } from 'lucide-react';
 import { WukongBrandMark } from './WukongBrandMark';
-import { HOMEPAGE_SEO, SEO_PAGES } from '../../shared/seoPages';
+import { HOMEPAGE_SEO, SEO_NAV_ITEMS } from '../../shared/seoNav';
 
 interface FooterProps {
   onOpenDiagnostics: () => void;
@@ -16,9 +16,9 @@ export function Footer({
   onOpenMcp,
   onNavigate,
 }: FooterProps) {
-  const platformLinks = SEO_PAGES.filter((p) => p.category === 'platform');
-  const developerLinks = SEO_PAGES.filter((p) => p.category === 'developer');
-  const resourceLinks = SEO_PAGES.filter(
+  const platformLinks = SEO_NAV_ITEMS.filter((p) => p.category === 'platform');
+  const developerLinks = SEO_NAV_ITEMS.filter((p) => p.category === 'developer');
+  const resourceLinks = SEO_NAV_ITEMS.filter(
     (p) => p.category === 'resource' || p.category === 'legal'
   );
 

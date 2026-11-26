@@ -12,7 +12,7 @@ import {
   unlockAudioEngine,
 } from '../utils/soundEffects';
 
-export const CUTSCENE_BG_URL = '/moon-cutscene-hd.jpg';
+export const CUTSCENE_BG_URL = '/moon-cutscene-hd.webp';
 
 interface OpeningSplashProps {
   isOpen: boolean;

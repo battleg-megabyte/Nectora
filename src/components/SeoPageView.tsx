@@ -11,27 +11,33 @@ import {
   Play,
   Terminal,
   Zap,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   HOMEPAGE_SEO,
   SEO_PAGES,
   SeoPageConfig,
+  getSeoPageByPath,
 } from '../../shared/seoPages';
 
 interface SeoPageViewProps {
-  page: SeoPageConfig;
+  pagePath: string;
   onNavigate: (path: string, prefillUrl?: string) => void;
   onOpenMcpModal: () => void;
   onOpenBatchModal: () => void;
+  onOpenDiagnosticsModal?: () => void;
 }
 
 export function SeoPageView({
-  page,
+  pagePath,
   onNavigate,
   onOpenMcpModal,
   onOpenBatchModal,
+  onOpenDiagnosticsModal,
 }: SeoPageViewProps) {
+  const page = getSeoPageByPath(pagePath);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  if (!page) return null;
   const origin =
     typeof window !== 'undefined'
       ? window.location.origin
@@ -159,15 +165,27 @@ export function SeoPageView({
             </>
           )}
 
-          {page.path === '/mcp' && (
-            <button
-              type="button"
-              onClick={onOpenMcpModal}
-              className="inline-flex items-center gap-1.5 py-2 text-xs sm:text-sm font-medium text-rose-200 hover:text-white transition-colors cursor-pointer"
-            >
-              <Terminal className="w-4 h-4 text-rose-400" />
-              <span>MCP Tester</span>
-            </button>
+          {(page.path === '/mcp' || page.path === '/api') && (
+            <>
+              <button
+                type="button"
+                onClick={onOpenMcpModal}
+                className="inline-flex items-center gap-1.5 py-2 text-xs sm:text-sm font-medium text-rose-200 hover:text-white transition-colors cursor-pointer"
+              >
+                <Terminal className="w-4 h-4 text-rose-400" />
+                <span>MCP Tester</span>
+              </button>
+              {onOpenDiagnosticsModal && (
+                <button
+                  type="button"
+                  onClick={onOpenDiagnosticsModal}
+                  className="inline-flex items-center gap-1.5 py-2 text-xs sm:text-sm font-medium text-rose-200 hover:text-white transition-colors cursor-pointer"
+                >
+                  <CheckCircle2 className="w-4 h-4 text-pink-400" />
+                  <span>Stream Check</span>
+                </button>
+              )}
+            </>
           )}
 
           {(page.path === '/how-it-works' || page.path === '/instagram-reel-downloader') && (

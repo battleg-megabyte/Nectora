@@ -1,5 +1,5 @@
 import { useState, MouseEvent } from 'react';
-import { History, Menu, X, Layers, CheckCircle2, Globe2, Cpu } from 'lucide-react';
+import { History, Menu, X, Layers, Music, Globe2, Code2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { WukongBrandMark } from './WukongBrandMark';
 
@@ -73,12 +73,12 @@ export function Header({
             <span>Platforms</span>
           </a>
           <a
-            href="/mcp"
-            onClick={(e) => handleLinkNav(e, '/mcp')}
+            href="/mp3-audio-extractor"
+            onClick={(e) => handleLinkNav(e, '/mp3-audio-extractor')}
             className="flex items-center gap-1.5 whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-pink-400 after:transition-all"
           >
-            <Cpu className="w-4 h-4 text-pink-300" />
-            <span>MCP &amp; API</span>
+            <Music className="w-4 h-4 text-pink-300" />
+            <span>MP3 Audio</span>
           </a>
           <button
             id="btn-batch-modal"
@@ -89,15 +89,14 @@ export function Header({
             <Layers className="w-4 h-4 text-rose-400" />
             <span>Batch Queue</span>
           </button>
-          <button
-            id="btn-diagnostics-modal"
-            type="button"
-            onClick={onOpenDiagnostics}
-            className="flex items-center gap-1.5 whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-pink-400 after:transition-all cursor-pointer"
+          <a
+            href="/mcp"
+            onClick={(e) => handleLinkNav(e, '/mcp')}
+            className="flex items-center gap-1.5 whitespace-nowrap shrink-0 py-1.5 hover:text-white transition-colors relative after:absolute after:bottom-0 after:left-0 after:w-0 hover:after:w-full after:h-px after:bg-pink-400 after:transition-all"
           >
-            <CheckCircle2 className="w-4 h-4 text-pink-400" />
-            <span>Stream Check</span>
-          </button>
+            <Code2 className="w-4 h-4 text-pink-400" />
+            <span>Developers</span>
+          </a>
         </nav>
 
         {/* Zone 3: History Action + Mobile Drawer Toggle (Zero sound button, unboxed action) */}
@@ -148,12 +147,12 @@ export function Header({
               <span>Supported Platforms</span>
             </a>
             <a
-              href="/mcp"
-              onClick={(e) => handleLinkNav(e, '/mcp')}
+              href="/mp3-audio-extractor"
+              onClick={(e) => handleLinkNav(e, '/mp3-audio-extractor')}
               className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
             >
-              <Cpu className="w-4 h-4 text-pink-300 shrink-0" />
-              <span>MCP Server &amp; API</span>
+              <Music className="w-4 h-4 text-pink-300 shrink-0" />
+              <span>MP3 Audio Extractor</span>
             </a>
             <button
               type="button"
@@ -163,14 +162,14 @@ export function Header({
               <Layers className="w-4 h-4 text-rose-400 shrink-0" />
               <span>Batch Queue</span>
             </button>
-            <button
-              type="button"
-              onClick={() => triggerMobileAction(onOpenDiagnostics)}
-              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left cursor-pointer"
+            <a
+              href="/mcp"
+              onClick={(e) => handleLinkNav(e, '/mcp')}
+              className="w-full flex items-center gap-3 px-2 min-h-[44px] text-sm font-medium text-white hover:text-rose-200 transition-colors text-left"
             >
-              <CheckCircle2 className="w-4 h-4 text-pink-400 shrink-0" />
-              <span>Stream Check</span>
-            </button>
+              <Code2 className="w-4 h-4 text-pink-400 shrink-0" />
+              <span>Developers</span>
+            </a>
           </motion.div>
         )}
       </AnimatePresence>
